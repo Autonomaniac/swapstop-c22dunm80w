@@ -1,0 +1,15 @@
+{
+  "name": "Swap Stop",
+  "short_name": "Swap Stop",
+  "description": "Free books in phone boxes and bus stops. See what's on the shelf before you go.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1f3550",
+  "theme_color": "#1f3550",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

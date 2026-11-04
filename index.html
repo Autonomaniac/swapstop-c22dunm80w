@@ -3,6 +3,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#1f3550">
+<meta name="apple-mobile-web-app-title" content="Swap Stop">
 <style>
 /* Layout: one column, phone first. A bookshelf header, two big actions, one search box. One decision per screen. */
 :root{
@@ -139,6 +143,33 @@ button:disabled{opacity:.6;cursor:wait}
 .leaflet-popup-content b{font-size:1.05rem}
 .pop-open{display:block;margin-top:10px;width:100%;min-height:48px;border:0;border-radius:10px;background:var(--green);color:var(--on-green);font:700 1rem var(--font);cursor:pointer}
 .leaflet-container a.leaflet-popup-close-button{font-size:26px;width:34px;height:34px}
+/* Shelf condition taps */
+.cond{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cond button{min-height:56px;border:3px solid var(--ink);border-radius:12px;background:var(--paper);color:var(--ink);font:700 1rem var(--font);cursor:pointer;padding:8px}
+.cond button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.condline{font-weight:700}
+/* Photos waiting to send, and the home-screen tip */
+.waiting{background:#fff6d6;color:#1b1e22;border:2px solid #e0a400;border-radius:12px;padding:12px 14px;display:grid;gap:8px}
+.tip{background:var(--tint);border:2px solid var(--line);border-radius:14px;padding:14px 16px;display:grid;gap:10px}
+.tip ol{margin:0;padding-left:1.3em}
+.tip .row .big{min-height:56px;font-size:1rem}
+/* The printable sign */
+.sign{border:4px solid #1f3550;border-radius:18px;padding:22px;display:grid;gap:14px;justify-items:center;text-align:center;background:#ffffff;color:#1b1e22}
+.sign h1{font-size:2rem}
+.sign .stopname{font-size:1.3rem;font-weight:700}
+.sign .qr{width:min(70vw,260px);height:min(70vw,260px)}
+.sign .qr svg{width:100%;height:100%}
+.sign .how{font-size:1.05rem;max-width:26rem}
+.sign .url{font-size:.85rem;word-break:break-all;color:#4a4f55}
+.sign .minishelf{display:flex;gap:3px;align-items:flex-end;height:40px}
+.sign .minishelf i{display:block;width:16px;border-radius:3px 3px 0 0}
+@media print{
+  @page{size:A5;margin:10mm}
+  body{background:#ffffff}
+  .crown,.note,body::before,.noprint{display:none!important}
+  .sign{border-width:3px;break-inside:avoid}
+  main{padding:0}
+}
 @media (prefers-reduced-motion:no-preference){.big{transition:transform .08s}.big:active{transform:scale(.98)}}
 </style>
 
@@ -169,6 +200,7 @@ button:disabled{opacity:.6;cursor:wait}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script>
 // Our own detective: green trilby, beige trench coat, big nose. He lifts his magnifying glass and a giant eye appears in it.
 const ICON_SEARCH=`<svg class="icon detective" viewBox="0 0 64 64" aria-hidden="true">
@@ -315,6 +347,86 @@ function stopCard(s,act){
 function wireCards(list){ view.querySelectorAll(".stop").forEach(b=>b.onclick=()=>{
   const s=list.find(x=>x.id===b.dataset.id); b.dataset.act==="pick"?go("photo",s):go("stop",s);});}
 
+// ---- Every stop, kept on the phone for a day, so "which stop are you at?" still works with no signal.
+async function getAllStops(){
+  if(window.__allStops) return window.__allStops;
+  let cached=null; try{cached=JSON.parse(localStorage.getItem("swapstop-stops")||"null");}catch(e){}
+  if(cached&&Date.now()-cached.at<864e5){ window.__allStops=cached.stops; return cached.stops; }
+  try{
+    const pages=await Promise.all([0,1,2,3].map(i=>sb.from("stops").select("id,name,kind,place,lat,lon").range(i*1000,i*1000+999)));
+    if(pages.some(p=>p.error)) throw new Error("load");
+    const stops=pages.flatMap(p=>p.data);
+    try{localStorage.setItem("swapstop-stops",JSON.stringify({at:Date.now(),stops}));}catch(e){}
+    window.__allStops=stops; return stops;
+  }catch(e){ if(cached){ window.__allStops=cached.stops; return cached.stops; } return []; }
+}
+const nearestFromCache=async(pt,n)=>(await getAllStops()).map(s=>({...s,metres:distance(pt,s)})).sort((a,b)=>a.metres-b.metres).slice(0,n);
+
+// ---- How fresh each stop's latest photo is, for the map colours.
+async function getFreshness(){ const {data}=await sb.rpc("stop_freshness"); const m=new Map(); (data||[]).forEach(r=>m.set(r.stop_id,r)); return m; }
+const AGE={fresh:"#3f9b4a",month:"#e0a400",none:"#d6303b"};
+const ageColour=seen=>{ if(!seen) return AGE.none; const d=(Date.now()-new Date(seen))/864e5; return d<8?AGE.fresh:d<31?AGE.month:AGE.none; };
+const CONDITION_LABEL={full:"Shelf is full",needs_books:"Needs more books",empty:"Shelf is empty",damaged:"Wet or damaged"};
+
+// ---- Photos waiting to send. Kept on the phone (IndexedDB) until there's signal, then sent automatically.
+const idb=()=>new Promise((res,rej)=>{ const r=indexedDB.open("swapstop",1);
+  r.onupgradeneeded=()=>r.result.createObjectStore("queue",{keyPath:"id"}); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+const qAll=async()=>{ const db=await idb(); return new Promise((res,rej)=>{ const t=db.transaction("queue").objectStore("queue").getAll(); t.onsuccess=()=>res(t.result); t.onerror=()=>rej(t.error); }); };
+const qPut=async item=>{ const db=await idb(); return new Promise((res,rej)=>{ const t=db.transaction("queue","readwrite"); t.objectStore("queue").put(item); t.oncomplete=res; t.onerror=()=>rej(t.error); }); };
+const qDel=async id=>{ const db=await idb(); return new Promise((res,rej)=>{ const t=db.transaction("queue","readwrite"); t.objectStore("queue").delete(id); t.oncomplete=res; t.onerror=()=>rej(t.error); }); };
+
+// Send one visit: upload each photo, then record the visit, then check it really saved.
+async function sendVisit(v,progress){
+  const paths=[];
+  for(let i=0;i<v.blobs.length;i++){
+    progress?.(`Sending photo ${i+1} of ${v.blobs.length}…`);
+    const path=`${DEVICE}/${v.id}-${i}.jpg`;
+    const {error}=await sb.storage.from("shelf-photos").upload(path,v.blobs[i],{contentType:"image/jpeg",upsert:false});
+    if(error&&!/exists|Duplicate/i.test(error.message)) throw Object.assign(new Error("photo"),{offline:!navigator.onLine});
+    paths.push(path);
+  }
+  progress?.("Saving…");
+  const {data:vid,error}=await sb.rpc("add_visit",{p_stop:v.stop.id,p_paths:paths,p_note:null,p_device:DEVICE,p_taken:v.takenAt,p_condition:v.condition});
+  if(error) throw Object.assign(new Error(/too many/.test(error.message)?"toomany":"save"),{offline:!navigator.onLine});
+  const chk=await sb.from("visits").select("id").eq("id",vid).maybeSingle();
+  if(chk.error||!chk.data) throw new Error("confirm");
+  return vid;
+}
+let flushing=false;
+async function flushQueue(){
+  if(flushing||!navigator.onLine) return; flushing=true;
+  try{ for(const v of await qAll()){ try{ await sendVisit(v); await qDel(v.id); }catch(e){ break; } } }
+  catch(e){} finally{ flushing=false; showWaiting(); }
+}
+async function showWaiting(){
+  const box=$("#waiting"); if(!box) return;
+  let n=0; try{ n=(await qAll()).length; }catch(e){}
+  box.hidden=!n;
+  if(n) box.innerHTML=`<b>${n===1?"1 visit is":n+" visits are"} waiting to send.</b><span>${navigator.onLine?"Sending now…":"They'll send by themselves the next time Swap Stop is open and your phone has signal."}</span>`;
+}
+addEventListener("online",flushQueue); setInterval(flushQueue,60000);
+
+// ---- "Put Swap Stop on your home screen": shown from the second visit, until added or dismissed.
+let installPrompt=null;
+addEventListener("beforeinstallprompt",e=>{ e.preventDefault(); installPrompt=e; showTip(); });
+const standalone=()=>matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
+function showTip(){
+  const box=$("#tip"); if(!box) return;
+  let visits=0,dismissed=false; try{ visits=+localStorage.getItem("swapstop-visits")||0; dismissed=localStorage.getItem("swapstop-tip")==="no"; }catch(e){}
+  if(standalone()||dismissed||visits<2){ box.hidden=true; return; }
+  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
+  box.hidden=false;
+  box.innerHTML=`<b>Put Swap Stop on your home screen</b>
+   ${installPrompt?`<p>It then opens like an app, with one tap.</p>`
+     :ios?`<ol><li>Tap the Share button (the square with an arrow) at the bottom of the screen.</li><li>Scroll down and tap <b>Add to Home Screen</b>.</li><li>Tap <b>Add</b>.</li></ol>`
+     :`<ol><li>Tap the three dots at the top right of the screen.</li><li>Tap <b>Add to Home screen</b> (or <b>Install app</b>).</li><li>Tap <b>Add</b>.</li></ol>`}
+   <div class="row">${installPrompt?'<button class="big green" id="tipadd">Add to my home screen</button>':""}<button class="big plain" id="tipno">No thanks</button></div>`;
+  $("#tipno").onclick=()=>{ try{localStorage.setItem("swapstop-tip","no");}catch(e){} box.hidden=true; };
+  const a=$("#tipadd"); if(a) a.onclick=async()=>{ installPrompt.prompt(); await installPrompt.userChoice.catch(()=>{}); installPrompt=null; box.hidden=true; };
+}
+try{ localStorage.setItem("swapstop-visits",String((+localStorage.getItem("swapstop-visits")||0)+1)); }catch(e){}
+if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+
 const SCREENS={
  home(){
   view.innerHTML=`<h1>Free books in phone boxes and bus stops</h1>
@@ -325,7 +437,10 @@ const SCREENS={
    </div>
    <form id="sf" role="search"><label class="field" for="q">Look for a book or a place
     <input type="search" id="q" placeholder="For example: Rebecca, or Cubert" autocomplete="off" enterkeyhint="search"></label></form>
-   <p class="small">2,405 book stops across the UK. Anyone can add a photo, no account needed.</p>`;
+   <p class="small">2,405 book stops across the UK. Anyone can add a photo, no account needed.</p>
+   <div class="waiting" id="waiting" hidden role="status"></div>
+   <div class="tip" id="tip" hidden></div>`;
+  showWaiting(); showTip();
   $("#near").onclick=()=>go("near");
   $("#add").onclick=()=>go("how");
   $("#sf").onsubmit=e=>{e.preventDefault(); const q=$("#q").value.trim(); if(q.length>=3) go("search",q); else $("#q").focus();};
@@ -334,7 +449,7 @@ const SCREENS={
   view.innerHTML=`<h1>Book stops</h1>
    <p class="lede" id="mapnote">Finding where you are…</p>
    <div id="map" role="region" aria-label="Map of book stops"></div>
-   <div class="legend"><span><i style="background:#d6303b"></i>Book stop</span><span><i style="background:#3f9b4a"></i>Has a shelf photo</span><span><i style="background:#2f73d9"></i>You</span></div>
+   <div class="legend"><span><i style="background:#3f9b4a"></i>Shelf photo this week</span><span><i style="background:#e0a400"></i>Photo this month</span><span><i style="background:#d6303b"></i>No recent photo</span><span><i style="background:#2f73d9"></i>You</span></div>
    <p class="small">Tap a dot to see the stop. Pinch or use + and − to zoom. Planning a trip? Move the map there and tap the button below.</p>
    <button class="big plain" id="here-list">List the stops in this part of the map</button>
    <h2 id="listhead" hidden></h2>
@@ -357,17 +472,13 @@ const SCREENS={
   $("#here-list").onclick=()=>{ const c=map.getCenter(); showList(c.lat,c.lng,"Stops nearest the middle of the map"); };
   // All stops as dots. The database hands out at most 1,000 rows per request, so ask in pages.
   (async()=>{
-   if(!window.__allStops){
-    const pages=await Promise.all([0,1,2,3].map(i=>sb.from("stops").select("id,name,kind,place,lat,lon").range(i*1000,i*1000+999)));
-    const vis=await sb.from("visits").select("stop_id");
-    window.__allStops=pages.flatMap(p=>p.data||[]); window.__withPhoto=new Set((vis.data||[]).map(v=>v.stop_id));
-   }
+   const [stops,fresh]=await Promise.all([getAllStops(),getFreshness().catch(()=>new Map())]);
    // tolerance: the tappable area reaches 16 px beyond each dot, so a fingertip doesn't have to land exactly on it.
    const r=L.canvas({padding:.5,tolerance:16});
-   for(const s of window.__allStops){
-    const has=window.__withPhoto.has(s.id);
-    s._m=L.circleMarker([s.lat,s.lon],{renderer:r,radius:has?8:6,weight:2,color:"#ffffff",fillColor:has?"#3f9b4a":"#d6303b",fillOpacity:1})
-     .bindPopup(`<b>${esc(s.name)}</b><br>${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}<br>${has?"Has a shelf photo":"No photo yet"}<button class="pop-open" data-stop="${esc(s.id)}">Open this stop</button>`)
+   for(const s of stops){
+    const f=fresh.get(s.id), col=ageColour(f?.seen);
+    s._m=L.circleMarker([s.lat,s.lon],{renderer:r,radius:f?8:6,weight:2,color:"#ffffff",fillColor:col,fillOpacity:1})
+     .bindPopup(`<b>${esc(s.name)}</b><br>${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}<br>${f?`Shelf photo ${when(f.seen)}`:"No photo yet"}${f?.condition?`<br>${CONDITION_LABEL[f.condition]}`:""}<button class="pop-open" data-stop="${esc(s.id)}">Open this stop</button>`)
      .addTo(map);
    }
   })();
@@ -393,7 +504,7 @@ const SCREENS={
  },
  async stop(s){
   busy("Opening "+s.name+"…");
-  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,note,read_status,created_at,taken_at").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).limit(1);
+  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,note,read_status,created_at,taken_at,condition").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).limit(1);
   if(error) return oops("This stop didn't load. Check you have signal.",()=>go("stop",s,false));
   const v=visits[0]; let books=[];
   if(v){ const r=await sb.from("books").select("title,author,confident").eq("visit_id",v.id); books=r.data||[]; }
@@ -401,6 +512,7 @@ const SCREENS={
   view.innerHTML=`<h1>${esc(s.name)}</h1><p class="lede">${where}</p>
    ${v?`${v.photo_paths.map((p,i)=>`<div class="photo" role="button" tabindex="0" data-ph aria-label="Shelf photo ${i+1}. Tap to make it bigger"><img src="${photoUrl(p)}" alt="Shelf photo ${i+1}"></div>`).join("")}
      <p class="caption">Photo taken ${when(v.taken_at||v.created_at)}. Tap a photo to make it bigger. Books change often, so some may have gone.</p>
+     ${v.condition?`<p class="condline">${CONDITION_LABEL[v.condition]} (${when(v.taken_at||v.created_at)})</p>`:""}
      <h2>Books on the shelf</h2>
      ${books.length?`<ul class="books">${books.map(b=>`<li><span class="t">${esc(b.title)}</span>${b.author?`<span class="a">${esc(b.author)}</span>`:""}${b.confident?"":'<span class="unsure">Spine hard to read, best guess</span>'}</li>`).join("")}</ul>`
        :`<p class="small">${v.read_status==="waiting"?"The book titles haven't been read from this photo yet. Zoom into the photo to see them.":"No titles could be read from this photo. Zoom into the photo to see them."}</p>`}`
@@ -408,14 +520,36 @@ const SCREENS={
    <div class="actions">
     <a class="big plain" href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}" target="_blank" rel="noopener">Get directions</a>
     <button class="big green" id="addhere">Add a new photo here</button>
+    <button class="big plain" id="printsign">Print a sign for this stop</button>
     ${v?'<button class="big plain" id="report">Report this photo</button><p id="reported" class="small" hidden>Thank you. If one more person reports it, it is hidden until it is checked.</p>':""}
    </div>`;
+  $("#printsign").onclick=()=>go("sign",s);
   view.querySelectorAll("[data-ph]").forEach(ph=>{const t=()=>ph.classList.toggle("zoomed"); ph.onclick=t; ph.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();t();}};});
   $("#addhere").onclick=()=>go("photo",s);
   const r=$("#report"); if(r) r.onclick=async()=>{ r.disabled=true;
     const {error}=await sb.rpc("report_visit",{p_visit:v.id,p_reason:"reported from stop page",p_device:DEVICE});
     if(error){ r.disabled=false; r.textContent="Report didn't send. Tap to try again"; return; }
     r.hidden=true; $("#reported").hidden=false; };
+ },
+ sign(s){
+  // A poster for the people who look after a stop to print and put up. The QR code opens this stop's page.
+  const link=`${location.origin}${location.pathname}?stop=${encodeURIComponent(s.id)}`;
+  let qrSvg="";
+  try{ const q=qrcode(0,"M"); q.addData(link); q.make(); qrSvg=q.createSvgTag({cellSize:6,margin:2,scalable:true}); }catch(e){}
+  view.innerHTML=`<div class="sign">
+    <div class="minishelf" aria-hidden="true"><i style="background:#d6303b;height:34px"></i><i style="background:#f2b705;height:28px"></i><i style="background:#1f9e8f;height:38px"></i><i style="background:#7b4fc4;height:30px"></i><i style="background:#f07c2a;height:36px"></i></div>
+    <h1>Free books here</h1>
+    <p class="stopname">${esc(s.name)}</p>
+    <p class="how">Take a book, leave a book. Scan the code to see what's on this shelf, or to add a photo of it when you swap a book.</p>
+    <div class="qr">${qrSvg||"<p>QR code didn't load. Check you have signal and try again.</p>"}</div>
+    <p class="how"><b>Swap Stop</b>: free books in phone boxes and bus stops</p>
+    <p class="url">${esc(link)}</p>
+   </div>
+   <div class="actions noprint">
+    <button class="big green" id="doprint">Print this sign</button>
+    <p class="small">Prints on one A5 sheet (half of A4). Pop it in a plastic sleeve so it survives the weather.</p>
+   </div>`;
+  $("#doprint").onclick=()=>window.print();
  },
  how(){
   view.innerHTML=`<h1>Add a photo of a shelf</h1>
@@ -482,9 +616,12 @@ const SCREENS={
  async pick(){
   busy("Finding where you are…");
   try{ await locate(); }catch(e){ return oops(e.message,()=>go("pick",null,false)); }
-  const {data,error}=await sb.rpc("stops_near",{p_lat:here.lat,p_lon:here.lon,p_limit:6});
-  if(error) return oops("The book stop list didn't load. Check you have signal.",()=>go("pick",null,false));
+  let {data,error}=await sb.rpc("stops_near",{p_lat:here.lat,p_lon:here.lon,p_limit:6}).catch(e=>({error:e}));
+  let offline=false;
+  if(error||!data){ data=await nearestFromCache(here,6); offline=true; }
+  if(!data.length) return oops("The book stop list didn't load, and none is saved on this phone yet. Open Swap Stop once where you have signal.",()=>go("pick",null,false));
   view.innerHTML=`<h1>Which stop are you at?</h1>
+   ${offline?'<p class="waiting">No signal here. That\'s fine: take your photos, and they\'ll send by themselves once you have signal again.</p>':""}
    <p class="lede">Pick it from the list, so every photo of the same stop stays together.</p>
    ${data.length?`<ul class="list">${data.map(s=>stopCard(s,"pick")).join("")}</ul>`:""}
    <button class="big plain" id="new">My stop isn't on the list</button>`;
@@ -531,12 +668,25 @@ const SCREENS={
    <input type="file" id="cam" accept="image/*" capture="environment" hidden>
    <label class="big plain" for="pickgal" style="cursor:pointer" id="gallabel">Choose a photo from my phone</label>
    <input type="file" id="pickgal" accept="image/*" hidden>
+   <div id="condbox" hidden>
+    <p style="font-weight:700;margin-bottom:8px">How's the shelf looking? (you can skip this)</p>
+    <div class="cond" id="cond">
+     <button data-c="full" aria-pressed="false">Full</button>
+     <button data-c="needs_books" aria-pressed="false">Needs books</button>
+     <button data-c="empty" aria-pressed="false">Empty</button>
+     <button data-c="damaged" aria-pressed="false">Wet or damaged</button>
+    </div>
+   </div>
    <button class="big green" id="send" hidden>Save these photos</button>
    <p id="msg" class="small" role="status"></p>`;
   const draw=()=>{ $("#pv").innerHTML=files.map((f,i)=>`<div class="photo"><img src="${f.url}" alt="Shelf photo ${i+1}"></div>
      <button class="big plain" data-rm="${i}">Remove photo ${i+1}</button>`).join("");
    $("#pv").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{files.splice(+b.dataset.rm,1);draw();});
-   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; };
+   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; $("#condbox").hidden=!files.length; };
+  let condition=null;
+  view.querySelectorAll("#cond button").forEach(b=>b.onclick=()=>{
+   condition=condition===b.dataset.c?null:b.dataset.c;
+   view.querySelectorAll("#cond button").forEach(x=>x.setAttribute("aria-pressed",String(x.dataset.c===condition))); });
   const addFile=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
    $("#msg").textContent="Getting the photo ready…";
    const meta=await readExif(f).catch(()=>({}));
@@ -544,27 +694,25 @@ const SCREENS={
    catch(err){ $("#msg").textContent="That photo couldn't be opened. Try again."; } };
   $("#cam").onchange=addFile; $("#pickgal").onchange=addFile; draw();
   $("#send").onclick=async()=>{ const btn=$("#send"); btn.disabled=true; $("#camlabel").hidden=true; $("#gallabel").hidden=true;
-   const takenAt=files.map(f=>f.taken).filter(Boolean).sort()[0]||null;
-   const paths=[];
-   for(let i=0;i<files.length;i++){
-    $("#msg").textContent=`Sending photo ${i+1} of ${files.length}…`;
-    const path=`${DEVICE}/${Date.now()}-${i}.jpg`;
-    const {error}=await sb.storage.from("shelf-photos").upload(path,files[i].blob,{contentType:"image/jpeg",upsert:false});
-    if(error){ btn.disabled=false; $("#msg").textContent="A photo didn't send. Check you have signal and tap Save again."; return; }
-    paths.push(path);
-   }
-   $("#msg").textContent="Saving…";
-   const {data:vid,error}=await sb.rpc("add_visit",{p_stop:s.id,p_paths:paths,p_note:null,p_device:DEVICE,p_taken:takenAt});
-   if(error){ btn.disabled=false; $("#msg").textContent=/too many/.test(error.message)?"This phone has sent a lot of photos in the last hour. Please try again later.":"The photos sent but didn't save to the stop. Tap Save again."; return; }
-   // Check it really saved before saying so.
-   const chk=await sb.from("visits").select("id").eq("id",vid).maybeSingle();
-   if(chk.error||!chk.data){ btn.disabled=false; $("#msg").textContent="We couldn't confirm the save. Tap Save again."; return; }
-   go("thanks",s); };
+   const v={id:`${Date.now()}-${Math.random().toString(36).slice(2,8)}`, stop:{id:s.id,name:s.name,kind:s.kind,place:s.place,lat:s.lat,lon:s.lon},
+     blobs:files.map(f=>f.blob), takenAt:files.map(f=>f.taken).filter(Boolean).sort()[0]||new Date().toISOString(), condition};
+   const keepForLater=async()=>{ try{ await qPut(v); go("thanks",{...s,queued:true}); }
+     catch(e){ btn.disabled=false; $("#msg").textContent="There's no signal and the photos couldn't be kept on this phone. Try again when you have signal."; } };
+   if(!navigator.onLine) return keepForLater();
+   try{ await sendVisit(v,t=>{$("#msg").textContent=t;}); go("thanks",s); }
+   catch(e){
+    if(e.message==="toomany"){ btn.disabled=false; $("#msg").textContent="This phone has sent a lot of photos in the last hour. Please try again later."; return; }
+    // Anything else here is almost always the signal dropping: keep them and send later.
+    keepForLater();
+   } };
  },
  thanks(s){
-  view.innerHTML=`<div class="done"><h1>Thank you</h1>
+  view.innerHTML=(s.queued?`<div class="done"><h1>Saved on your phone</h1>
+   <p>There's no signal right now, so your photos of ${esc(s.name)} are kept safe on this phone.</p>
+   <p>They'll send by themselves the next time Swap Stop is open and you have signal. You don't need to do anything else.</p></div>`
+   :`<div class="done"><h1>Thank you</h1>
    <p>Your photos of ${esc(s.name)} are saved. Anyone looking at this stop can see them now.</p>
-   <p class="small">The book titles are read from the photos later, so they can be searched.</p></div>
+   <p class="small">The book titles are read from the photos later, so they can be searched.</p></div>`)+`
    <button class="big green" id="see">See ${esc(s.name)}</button>
    <button class="big plain" id="h">Back to the start</button>`;
   $("#see").onclick=()=>{history_=[["home"]]; go("stop",s);};
@@ -630,7 +778,18 @@ async function shrink(file){
   c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
   return await new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error("encode")),"image/jpeg",0.88));
 }
-go("home");
+
+// A link with ?stop=<id> (from a printed sign's QR code) opens that stop straight away.
+(async()=>{
+  const id=new URLSearchParams(location.search).get("stop");
+  go("home");
+  getAllStops(); // keep a copy of the stop list on the phone for places with no signal
+  if(!id) { flushQueue(); return; }
+  const {data:s}=await sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",id).maybeSingle();
+  const st=s||(await getAllStops()).find(x=>x.id===id);
+  if(st) go("stop",st);
+  flushQueue();
+})();
 </script>
 
 </body></html>
