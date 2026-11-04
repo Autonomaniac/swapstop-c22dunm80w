@@ -1,0 +1,436 @@
+<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<title>Swap Stop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: one column, phone first. A bookshelf header, two big actions, one search box. One decision per screen. */
+:root{
+  --paper:#ffffff; --ink:#1b1e22; --muted:#4a4f55; --line:#d9d5cf;
+  --box-red:#b3121e; --on-red:#ffffff; --sign:#14161a; --on-sign:#fffdf6;
+  --green:#1d5c3f; --on-green:#ffffff; --tint:#f6f3ef; --focus:#f2b705;
+  --font:"Atkinson Hyperlegible", "Verdana", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#16181b; --ink:#f2f1ee; --muted:#c2c0bb; --line:#3a3d42;
+  --box-red:#c42a35; --on-red:#ffffff; --sign:#0d0e10; --on-sign:#fffdf6;
+  --green:#2e7d57; --on-green:#ffffff; --tint:#202327; --focus:#f2b705; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#16181b; --ink:#f2f1ee; --muted:#c2c0bb; --line:#3a3d42;
+  --box-red:#c42a35; --on-red:#ffffff; --sign:#0d0e10; --on-sign:#fffdf6;
+  --green:#2e7d57; --on-green:#ffffff; --tint:#202327; --focus:#f2b705; color-scheme:dark}
+
+body{background:var(--paper);color:var(--ink);font-family:var(--font);font-size:20px;line-height:1.5}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--shelf)}
+.wrap{max-width:34rem;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* The header is a little bookshelf: each letter of SWAP STOP is a book spine */
+:root{--shelf:#1f3550; --wood:#a8713d; --wood-dark:#7a4f27; --on-shelf:#ffffff;
+  --s1:#d6303b; --s2:#f2b705; --s3:#1f9e8f; --s4:#7b4fc4; --s5:#f07c2a; --s6:#3f9b4a; --s7:#2f73d9; --s8:#e0569a; --spine-ink:#1b1e22}
+.crown{background:var(--shelf);padding-block:10px 0;position:sticky;top:env(safe-area-inset-top,0px);z-index:5;overflow:hidden}
+.crown .wrap{display:flex;align-items:flex-end;gap:8px}
+.home-btn{all:unset;cursor:pointer;flex:1;display:block;border-radius:6px}
+.brand{display:flex;justify-content:center;align-items:flex-end;gap:3px;height:64px}
+.brand .gap{width:14px}
+.spine{display:grid;place-items:center;width:30px;border-radius:4px 4px 0 0;font-weight:700;font-size:1.25rem;line-height:1;
+  background:var(--c);color:var(--t,var(--on-shelf));box-shadow:inset -4px 0 0 rgb(0 0 0 / .16), inset 0 5px 0 rgb(255 255 255 / .22);
+  height:var(--h,54px);transform-origin:bottom center}
+.shelf-board{height:10px;background:var(--wood);border-top:3px solid var(--wood-dark);margin-top:0}
+.back{all:unset;cursor:pointer;color:var(--on-shelf);font-weight:700;font-size:1.05rem;padding:10px 8px;min-height:44px;display:flex;align-items:center;align-self:center}
+.back[hidden]{display:none!important}
+@media (max-width:380px){.spine{width:25px;font-size:1.05rem}.brand .gap{width:8px}}
+
+/* Motion: gentle and occasional. Books drop onto the shelf once, then now and then one leans and rights itself. */
+@media (prefers-reduced-motion:no-preference){
+  .spine{animation:drop .6s cubic-bezier(.3,1.5,.5,1) both, lean 9s ease-in-out infinite;animation-delay:var(--d,0s), calc(var(--d,0s) + var(--l,2s))}
+  @keyframes drop{from{transform:translateY(-120%)}to{transform:none}}
+  @keyframes lean{0%,88%,100%{rotate:0deg}92%{rotate:-9deg}96%{rotate:3deg}}
+  /* Detective, 7s: lifts the glass to his eye, the giant magnified eye looks left, right, blinks,
+     spots something (sparkle, eyebrow up), then lowers the glass and gives a little bounce. */
+  .icon .det{animation:hop 7s ease-in-out infinite;transform-origin:32px 64px}
+  @keyframes hop{0%,82%,100%{transform:none}86%{transform:translateY(-3px)}90%{transform:none}}
+  .icon .arm{animation:raise 7s ease-in-out infinite;transform-origin:41px 41px}
+  @keyframes raise{0%,8%{transform:rotate(62deg)}18%,68%{transform:rotate(0)}78%,100%{transform:rotate(62deg)}}
+  .icon .pupil{animation:look 7s ease-in-out infinite}
+  @keyframes look{0%,22%{transform:translate(0,0)}28%,34%{transform:translate(-3.5px,1px)}40%,46%{transform:translate(3.5px,0)}50%,100%{transform:translate(0,0)}}
+  .icon .bigeye{animation:blink 7s linear infinite;transform-origin:39px 21px}
+  @keyframes blink{0%,47%,51%,100%{transform:scaleY(1)}49%{transform:scaleY(.1)}}
+  .icon .brow{animation:brow 7s ease-out infinite}
+  @keyframes brow{0%,12%,76%,100%{transform:translateY(0);opacity:0}18%,52%,68%{transform:translateY(0);opacity:1}56%,64%{transform:translateY(-3px);opacity:1}}
+  .icon .spark{animation:spark 7s ease-out infinite;transform-origin:39px 21px}
+  @keyframes spark{0%,53%{opacity:0;transform:scale(.6)}58%{opacity:1;transform:scale(1.1)}68%,100%{opacity:0;transform:scale(1.4)}}
+
+  /* Detective with camera, 7s (offset 3.5s from the other so they take turns):
+     lifts the camera, flash, a little photo of a bookshelf slides out of the top, grin, lowers it, hop. */
+  .icon.snap .det,.icon.snap .arm,.icon.snap .flash,.icon.snap .print,.icon.snap .grin{animation-delay:3.5s;animation-fill-mode:both}
+  .icon .flash{animation:flash 7s ease-out infinite both;transform-origin:47px 10px}
+  @keyframes flash{0%,34%,100%{opacity:0;transform:scale(.5)}37%{opacity:1;transform:scale(1)}48%{opacity:0;transform:scale(1.35)}}
+  .icon .print{animation:print 7s ease-in-out infinite both}
+  @keyframes print{0%,40%{transform:translateY(13px)}52%,68%{transform:translateY(0)}74%,100%{transform:translateY(13px)}}
+  .icon .grin{animation:grin 7s ease-out infinite both}
+  @keyframes grin{0%,40%,76%,100%{opacity:0}46%,72%{opacity:1}}
+}
+.icon{width:64px;height:64px;flex:none;overflow:visible}
+.icon.detective{width:76px;height:76px;margin-block:-6px}
+.icon .flash,.icon .spark,.icon .grin{opacity:0}
+@media (prefers-reduced-motion:reduce){.icon .grin{opacity:1}}
+
+.note{background:var(--tint);border-left:6px solid var(--green);padding:10px 14px;font-size:.9rem;color:var(--muted);margin-block:16px 0}
+main{padding-block:20px 48px;display:grid;gap:22px}
+h1,h2{line-height:1.2;text-wrap:balance;margin:0}
+h1{font-size:1.6rem}
+h2{font-size:1.3rem}
+p{margin:0}
+.lede{color:var(--muted)}
+
+.big{display:flex;align-items:center;justify-content:center;gap:14px;width:100%;min-height:72px;border:0;border-radius:14px;
+  font:700 1.2rem/1.2 var(--font);cursor:pointer;padding:14px 18px;text-align:center;text-decoration:none;box-sizing:border-box}
+.big.red{background:var(--box-red);color:var(--on-red)}
+.big.green{background:var(--green);color:var(--on-green)}
+.big.plain{background:transparent;color:var(--ink);border:3px solid var(--ink);min-height:60px;font-size:1.05rem}
+.actions{display:grid;gap:14px}
+
+label.field{display:grid;gap:8px;font-weight:700}
+input[type=search]{font:1.1rem var(--font);padding:14px 16px;min-height:60px;border:3px solid var(--ink);border-radius:12px;background:var(--paper);color:var(--ink);width:100%;box-sizing:border-box}
+:focus-visible{outline:4px solid var(--focus);outline-offset:3px}
+
+.list{display:grid;gap:12px;list-style:none;margin:0;padding:0}
+.stop{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:76px 1fr;gap:14px;align-items:center;width:100%;
+  padding:12px;border:2px solid var(--line);border-radius:12px;background:var(--paper)}
+.stop:hover{border-color:var(--ink)}
+.stop .name{font-weight:700;font-size:1.1rem;line-height:1.25}
+.stop .meta{color:var(--muted);font-size:.95rem}
+.stop .dist{font-weight:700;color:var(--green)}
+.thumb{width:76px;height:76px;border-radius:8px;overflow:hidden}
+
+.shelf{display:flex;align-items:flex-end;gap:2px;height:100%;padding:8% 6% 0;box-sizing:border-box;
+  background:linear-gradient(to top,#6b4a2b 0 9%,#d9cdb8 9%)}
+.shelf i{display:block;flex:1;border-radius:2px 2px 0 0}
+.photo{border-radius:12px;overflow:hidden;aspect-ratio:4/3;max-width:100%;border:2px solid var(--line);cursor:zoom-in;background:var(--tint)}
+.photo.zoomed{aspect-ratio:auto;height:70vh;cursor:zoom-out}
+.photo img{width:100%;height:100%;object-fit:cover;display:block}
+.photo.zoomed img{object-fit:contain}
+.caption{font-size:.9rem;color:var(--muted)}
+
+.books{list-style:none;margin:0;padding:0;border-top:2px solid var(--line)}
+.books li{padding:12px 0;border-bottom:2px solid var(--line);display:grid;gap:2px}
+.books .t{font-weight:700}
+.books .a{color:var(--muted);font-size:.95rem}
+.books mark,.stop mark{background:color-mix(in srgb,var(--focus) 45%,transparent);color:inherit;border-radius:3px;padding:0 2px}
+.unsure{font-size:.85rem;color:var(--muted)}
+
+.row{display:flex;flex-wrap:wrap;gap:12px}
+.row .big{flex:1 1 12rem}
+.done{background:var(--tint);border-radius:14px;padding:18px;display:grid;gap:8px}
+.small{font-size:.9rem;color:var(--muted)}
+.hit-kind{font-size:.85rem;font-weight:700;color:var(--muted)}
+button:disabled{opacity:.6;cursor:wait}
+@media (prefers-reduced-motion:no-preference){.big{transition:transform .08s}.big:active{transform:scale(.98)}}
+</style>
+
+<header class="crown">
+  <div class="wrap">
+    <button class="back" id="back" hidden aria-label="Go back">‹ Back</button>
+    <button class="home-btn" id="home-link" aria-label="Swap Stop home">
+      <span class="brand" aria-hidden="true">
+        <span class="spine" style="--c:var(--s1);--h:56px;--d:.05s;--l:1s">S</span>
+        <span class="spine" style="--c:var(--s2);--t:var(--spine-ink);--h:50px;--d:.12s;--l:5s">W</span>
+        <span class="spine" style="--c:var(--s3);--h:58px;--d:.19s;--l:3s">A</span>
+        <span class="spine" style="--c:var(--s4);--h:52px;--d:.26s;--l:7s">P</span>
+        <span class="gap"></span>
+        <span class="spine" style="--c:var(--s5);--t:var(--spine-ink);--h:55px;--d:.33s;--l:2s">S</span>
+        <span class="spine" style="--c:var(--s6);--h:49px;--d:.40s;--l:6s">T</span>
+        <span class="spine" style="--c:var(--s7);--h:57px;--d:.47s;--l:4s">O</span>
+        <span class="spine" style="--c:var(--s8);--h:51px;--d:.54s;--l:8s">P</span>
+      </span>
+    </button>
+  </div>
+  <div class="shelf-board"></div>
+</header>
+
+<div class="wrap">
+  <p class="note" id="preview-note">Test version. Photos you add here are real and saved.</p>
+  <main id="view" aria-live="polite"></main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+// Our own detective: green trilby, beige trench coat, big nose. He lifts his magnifying glass and a giant eye appears in it.
+const ICON_SEARCH=`<svg class="icon detective" viewBox="0 0 64 64" aria-hidden="true">
+ <g class="det" stroke="#1b1e22" stroke-width="1.4" stroke-linejoin="round">
+  <ellipse cx="22" cy="61" rx="5" ry="2.4" fill="#3a2a1e"/><ellipse cx="34" cy="61" rx="5" ry="2.4" fill="#3a2a1e"/>
+  <path d="M14 59l3-21q11-5 22 0l3 21z" fill="#d9b27c"/>
+  <path d="M15.5 49h25" stroke-width="3.2" stroke="#9c7344"/>
+  <path d="M22 37l6 8 6-8" fill="#c79c62"/>
+  <circle cx="25" cy="53" r="1" fill="#1b1e22" stroke="none"/><circle cx="31" cy="53" r="1" fill="#1b1e22" stroke="none"/>
+  <path d="M15 42q-3 7 -1 12" fill="none" stroke-width="3.4" stroke="#d9b27c"/>
+  <circle cx="27" cy="24" r="12" fill="#ffd2a8"/>
+  <ellipse cx="38" cy="28" rx="4.6" ry="3.8" fill="#f4b88a"/>
+  <path d="M29 33q3 1.5 5 0" fill="none" stroke-linecap="round"/>
+  <circle cx="33" cy="21" r="4" fill="#ffffff"/><circle cx="34" cy="21.5" r="1.8" fill="#1b1e22" stroke="none"/>
+  <path d="M10 15q17-7 34 0q-3 2-17 2t-17-2z" fill="#2b5d4a"/>
+  <path d="M15 14q1-10 12-11q11 1 12 11q-12 3-24 0z" fill="#2b5d4a"/>
+  <path d="M15.5 12.5q11.5 3 23 0" fill="none" stroke="#1b1e22" stroke-width="2.6"/>
+  <g class="arm">
+   <path d="M41 41q6-8 3-15" fill="none" stroke="#d9b27c" stroke-width="5.2" stroke-linecap="round"/>
+   <circle cx="44" cy="27" r="3" fill="#ffd2a8"/>
+   <path d="M45 30l5 8" stroke="#3a2a1e" stroke-width="3.6" stroke-linecap="round"/>
+   <circle cx="39" cy="21" r="10.5" fill="#ffffff" stroke="#8a8f96" stroke-width="3"/>
+   <g class="bigeye"><circle cx="39" cy="21" r="7.5" fill="#ffffff" stroke-width="1"/>
+    <g class="pupil"><circle cx="39" cy="21.5" r="4" fill="#1b1e22" stroke="none"/><circle cx="37.6" cy="20" r="1.2" fill="#ffffff" stroke="none"/></g></g>
+   <path class="brow" d="M33 9q6-3 12 0" fill="none" stroke-width="2" stroke-linecap="round"/>
+  </g>
+  <g class="spark" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" fill="none"><path d="M54 10l3-3M56 19h4M53 28l3 3"/></g>
+ </g>
+</svg>`;
+// The same detective, this time lifting a camera: flash, then a tiny photo of a bookshelf pops out of the top
+const ICON_CAMERA=`<svg class="icon detective snap" viewBox="0 0 64 64" aria-hidden="true">
+ <g class="det" stroke="#1b1e22" stroke-width="1.4" stroke-linejoin="round">
+  <ellipse cx="22" cy="61" rx="5" ry="2.4" fill="#3a2a1e"/><ellipse cx="34" cy="61" rx="5" ry="2.4" fill="#3a2a1e"/>
+  <path d="M14 59l3-21q11-5 22 0l3 21z" fill="#d9b27c"/>
+  <path d="M15.5 49h25" stroke-width="3.2" stroke="#9c7344"/>
+  <path d="M22 37l6 8 6-8" fill="#c79c62"/>
+  <circle cx="25" cy="53" r="1" fill="#1b1e22" stroke="none"/><circle cx="31" cy="53" r="1" fill="#1b1e22" stroke="none"/>
+  <path d="M15 42q-3 7 -1 12" fill="none" stroke-width="3.4" stroke="#d9b27c"/>
+  <circle cx="27" cy="24" r="12" fill="#ffd2a8"/>
+  <ellipse cx="38" cy="28" rx="4.6" ry="3.8" fill="#f4b88a"/>
+  <path d="M29 33q3 1.5 5 0" fill="none" stroke-linecap="round"/>
+  <path class="grin" d="M28 32.5q3.5 3.5 7 0" fill="#ffffff" stroke-linecap="round"/>
+  <circle cx="33" cy="21" r="4" fill="#ffffff"/><circle cx="34" cy="21.5" r="1.8" fill="#1b1e22" stroke="none"/>
+  <path d="M10 15q17-7 34 0q-3 2-17 2t-17-2z" fill="#2b5d4a"/>
+  <path d="M15 14q1-10 12-11q11 1 12 11q-12 3-24 0z" fill="#2b5d4a"/>
+  <path d="M15.5 12.5q11.5 3 23 0" fill="none" stroke="#1b1e22" stroke-width="2.6"/>
+  <g class="arm">
+   <path d="M41 41q6-8 3-15" fill="none" stroke="#d9b27c" stroke-width="5.2" stroke-linecap="round"/>
+   <svg x="38" y="1" width="18" height="15" viewBox="0 0 18 15" overflow="hidden"><g class="print">
+    <rect x="1" y="1" width="16" height="16" rx="1" fill="#ffffff" stroke="#1f3550" stroke-width="1.2"/>
+    <rect x="3.5" y="4" width="2.2" height="8" fill="#d6303b" stroke="none"/><rect x="6.5" y="5.5" width="2.2" height="6.5" fill="#2f73d9" stroke="none"/>
+    <rect x="9.5" y="3.5" width="2.2" height="8.5" fill="#f2b705" stroke="none"/><rect x="12.5" y="5" width="2.2" height="7" fill="#3f9b4a" stroke="none"/>
+    <rect x="2.5" y="12" width="13" height="1.3" fill="#a8713d" stroke="none"/></g></svg>
+   <rect x="31" y="13" width="26" height="17" rx="3.5" fill="#ffffff"/>
+   <rect x="36" y="10" width="9" height="4.5" rx="1.2" fill="#ffffff"/>
+   <circle cx="44" cy="21.5" r="6" fill="#1f3550"/><circle cx="44" cy="21.5" r="3.4" fill="#2f73d9" stroke="none"/>
+   <circle cx="42.6" cy="20.1" r="1.1" fill="#ffffff" stroke="none"/>
+   <rect x="51" y="15.5" width="4" height="3" rx="1" fill="#f2b705" stroke-width="1"/>
+   <circle cx="44" cy="33" r="3" fill="#ffd2a8"/>
+  </g>
+  <g class="flash" stroke="#f2b705" stroke-width="2.6" stroke-linecap="round" fill="none"><path d="M60 8l3-3M61 16h3M53 4l1-3"/></g>
+ </g>
+</svg>`;
+
+const SB_URL="https://veqxevwnxdplnccttyno.supabase.co";
+const SB_KEY="sb_publishable_bzlf8I8clINOnP_q4B1TAA_XJ8EFu08";
+const sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:false}});
+const PHOTO_BASE=SB_URL+"/storage/v1/object/public/shelf-photos/";
+const KIND_LABEL={phone_box:"Phone box",bus_shelter:"Bus shelter",other:"Book swap"};
+
+// An anonymous id for this phone, so the database can limit how fast one phone adds things. No personal data.
+function deviceId(){
+  let id=null; try{id=localStorage.getItem("swapstop-device");}catch(e){}
+  if(!id||!/^[A-Za-z0-9-]{16,64}$/.test(id)){
+    const a=new Uint8Array(18); crypto.getRandomValues(a);
+    id=Array.from(a,b=>"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-"[b%63]).join("");
+    try{localStorage.setItem("swapstop-device",id);}catch(e){}
+  }
+  return id;
+}
+const DEVICE=deviceId();
+
+const $=s=>document.querySelector(s);
+const view=$("#view"),back=$("#back");
+let history_=[]; let here=null; // here = {lat,lon} once the phone has told us
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const dist=m=>m==null?"":(m<1000?`${Math.round(m/80)||1} min walk`:`${(m/1000).toFixed(1)} km away`);
+const when=t=>{if(!t)return null;const d=new Date(t),days=Math.floor((Date.now()-d)/864e5);
+  return days<1?"today":days<2?"yesterday":days<14?`${days} days ago`:d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});};
+const photoUrl=p=>PHOTO_BASE+p.split("/").map(encodeURIComponent).join("/");
+const thumb=p=>p?`<img src="${photoUrl(p)}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover">`:'<div class="shelf" style="background:var(--tint)"></div>';
+const busy=msg=>{view.innerHTML=`<p class="lede" role="status">${esc(msg)}</p>`;};
+const oops=(msg,again)=>{view.innerHTML=`<div class="done"><h2>That didn't work</h2><p>${esc(msg)}</p></div>
+  <button class="big plain" id="retry">Try again</button><button class="big plain" id="tohome">Back to the start</button>`;
+  $("#retry").onclick=again; $("#tohome").onclick=()=>{history_=[];go("home");};};
+
+function go(name,arg,push=true){ if(push) history_.push([name,arg]); back.hidden=history_.length<=1; window.scrollTo(0,0); SCREENS[name](arg); }
+back.onclick=()=>{ if(history_.length>1){history_.pop(); const [n,a]=history_[history_.length-1]; go(n,a,false);} };
+$("#home-link").onclick=()=>{history_=[]; go("home");};
+
+function locate(){ return new Promise((res,rej)=>{
+  if(!navigator.geolocation) return rej(new Error("This phone can't share its location."));
+  navigator.geolocation.getCurrentPosition(p=>{here={lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy};res(here);},
+    e=>rej(new Error(e.code===1?"Location is switched off for this page. You can search by town instead.":"Your phone couldn't find where you are. Try again outside, or search by town.")),
+    {enableHighAccuracy:true,timeout:15000,maximumAge:60000}); }); }
+
+function stopCard(s,act){
+  return `<li><button class="stop" data-id="${esc(s.id)}" data-act="${act}">
+    <div class="thumb">${thumb(s.latest_photo)}</div>
+    <div><div class="name">${esc(s.name)}</div>
+    <div class="meta">${s.metres!=null?`<span class="dist">${dist(s.metres)}</span> · `:""}${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}</div>
+    <div class="meta">${s.last_seen?`Shelf photo ${when(s.last_seen)}`:"No photo yet"}</div></div></button></li>`;
+}
+function wireCards(list){ view.querySelectorAll(".stop").forEach(b=>b.onclick=()=>{
+  const s=list.find(x=>x.id===b.dataset.id); b.dataset.act==="pick"?go("photo",s):go("stop",s);});}
+
+const SCREENS={
+ home(){
+  view.innerHTML=`<h1>Free books in phone boxes and bus stops</h1>
+   <p class="lede">Take a book, leave a book. See what's on the shelf before you go.</p>
+   <div class="actions">
+    <button class="big red" id="near">${ICON_SEARCH}<span>Find books near me</span></button>
+    <button class="big green" id="add">${ICON_CAMERA}<span>Add a photo of a shelf</span></button>
+   </div>
+   <form id="sf" role="search"><label class="field" for="q">Look for a book or a place
+    <input type="search" id="q" placeholder="For example: Rebecca, or Cubert" autocomplete="off" enterkeyhint="search"></label></form>
+   <p class="small">2,405 book stops across the UK. Anyone can add a photo, no account needed.</p>`;
+  $("#near").onclick=()=>go("near");
+  $("#add").onclick=()=>go("pick");
+  $("#sf").onsubmit=e=>{e.preventDefault(); const q=$("#q").value.trim(); if(q.length>=3) go("search",q); else $("#q").focus();};
+ },
+ async near(){
+  busy("Finding where you are…");
+  try{ await locate(); }catch(e){ return oops(e.message,()=>go("near",null,false)); }
+  busy("Looking for book stops near you…");
+  const {data,error}=await sb.rpc("stops_near",{p_lat:here.lat,p_lon:here.lon,p_limit:30});
+  if(error) return oops("The book stop list didn't load. Check you have signal.",()=>go("near",null,false));
+  view.innerHTML=`<h1>Book stops near you</h1><p class="lede">Closest first.</p>
+   ${data.length?`<ul class="list">${data.map(s=>stopCard(s,"open")).join("")}</ul>`
+   :`<div class="done"><h2>None mapped near you yet</h2><p>If you know one, add it with "Add a photo of a shelf".</p></div>`}`;
+  wireCards(data);
+ },
+ async stop(s){
+  busy("Opening "+s.name+"…");
+  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,note,read_status,created_at").eq("stop_id",s.id).order("created_at",{ascending:false}).limit(1);
+  if(error) return oops("This stop didn't load. Check you have signal.",()=>go("stop",s,false));
+  const v=visits[0]; let books=[];
+  if(v){ const r=await sb.from("books").select("title,author,confident").eq("visit_id",v.id); books=r.data||[]; }
+  const where=`${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}${s.metres!=null?" · "+dist(s.metres):""}`;
+  view.innerHTML=`<h1>${esc(s.name)}</h1><p class="lede">${where}</p>
+   ${v?`${v.photo_paths.map((p,i)=>`<div class="photo" role="button" tabindex="0" data-ph aria-label="Shelf photo ${i+1}. Tap to make it bigger"><img src="${photoUrl(p)}" alt="Shelf photo ${i+1}"></div>`).join("")}
+     <p class="caption">Photo taken ${when(v.created_at)}. Tap a photo to make it bigger. Books change often, so some may have gone.</p>
+     <h2>Books on the shelf</h2>
+     ${books.length?`<ul class="books">${books.map(b=>`<li><span class="t">${esc(b.title)}</span>${b.author?`<span class="a">${esc(b.author)}</span>`:""}${b.confident?"":'<span class="unsure">Spine hard to read, best guess</span>'}</li>`).join("")}</ul>`
+       :`<p class="small">${v.read_status==="waiting"?"The book titles haven't been read from this photo yet. Zoom into the photo to see them.":"No titles could be read from this photo. Zoom into the photo to see them."}</p>`}`
+   :`<div class="done"><h2>No photo yet</h2><p>Be the first to show what's on this shelf.</p></div>`}
+   <div class="actions">
+    <a class="big plain" href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}" target="_blank" rel="noopener">Get directions</a>
+    <button class="big green" id="addhere">Add a new photo here</button>
+    ${v?'<button class="big plain" id="report">Report this photo</button><p id="reported" class="small" hidden>Thank you. If one more person reports it, it is hidden until it is checked.</p>':""}
+   </div>`;
+  view.querySelectorAll("[data-ph]").forEach(ph=>{const t=()=>ph.classList.toggle("zoomed"); ph.onclick=t; ph.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();t();}};});
+  $("#addhere").onclick=()=>go("photo",s);
+  const r=$("#report"); if(r) r.onclick=async()=>{ r.disabled=true;
+    const {error}=await sb.rpc("report_visit",{p_visit:v.id,p_reason:"reported from stop page",p_device:DEVICE});
+    if(error){ r.disabled=false; r.textContent="Report didn't send. Tap to try again"; return; }
+    r.hidden=true; $("#reported").hidden=false; };
+ },
+ async pick(){
+  busy("Finding where you are…");
+  try{ await locate(); }catch(e){ return oops(e.message,()=>go("pick",null,false)); }
+  const {data,error}=await sb.rpc("stops_near",{p_lat:here.lat,p_lon:here.lon,p_limit:6});
+  if(error) return oops("The book stop list didn't load. Check you have signal.",()=>go("pick",null,false));
+  view.innerHTML=`<h1>Which stop are you at?</h1>
+   <p class="lede">Pick it from the list, so every photo of the same stop stays together.</p>
+   ${data.length?`<ul class="list">${data.map(s=>stopCard(s,"pick")).join("")}</ul>`:""}
+   <button class="big plain" id="new">My stop isn't on the list</button>`;
+  wireCards(data); $("#new").onclick=()=>go("newstop");
+ },
+ newstop(){
+  view.innerHTML=`<h1>Add your stop</h1>
+   <p class="lede">You need to be standing at it, so the map puts it in the right place.</p>
+   <label class="field" for="sname">What is it called?
+    <input type="search" id="sname" placeholder="For example: Cubert bus shelter" maxlength="80" autocomplete="off"></label>
+   <p style="font-weight:700">What is it?</p>
+   <div class="actions" id="kinds">
+    <button class="big plain" data-k="phone_box">A phone box</button>
+    <button class="big plain" data-k="bus_shelter">A bus shelter</button>
+    <button class="big plain" data-k="other">Something else</button>
+   </div>
+   <p id="msg" class="small" role="status"></p>`;
+  view.querySelectorAll("#kinds button").forEach(b=>b.onclick=async()=>{
+   const name=$("#sname").value.trim(); if(name.length<2){ $("#msg").textContent="Please type a name for the stop first."; $("#sname").focus(); return; }
+   $("#msg").textContent="Checking where you are…";
+   try{ await locate(); }catch(e){ $("#msg").textContent=e.message; return; }
+   if(here.acc>60){ $("#msg").textContent=`Your phone only knows where you are to within ${Math.round(here.acc)} metres. Step outside or wait a moment, then tap again.`; return; }
+   const {data,error}=await sb.rpc("add_stop",{p_name:name,p_kind:b.dataset.k,p_place:null,p_lat:here.lat,p_lon:here.lon,p_device:DEVICE});
+   if(error){ $("#msg").textContent=/too many/.test(error.message)?"This phone has added a lot of stops today. Please try again tomorrow.":"The stop didn't save. Check you have signal and tap again."; return; }
+   if(!data.ok){ const s={id:data.existing_id,name:data.existing_name,kind:b.dataset.k};
+     view.innerHTML=`<div class="done"><h2>This stop is already on the map</h2><p>It's called "${esc(s.name)}". We'll add your photo to it, so all the photos stay together.</p></div>
+      <button class="big green" id="useit">Add my photo to ${esc(s.name)}</button>`;
+     $("#useit").onclick=()=>go("photo",s); return; }
+   go("photo",{id:data.id,name,kind:b.dataset.k,place:null});
+  });
+ },
+ photo(s){
+  let files=[];
+  view.innerHTML=`<h1>Take photos of the shelves</h1>
+   <p class="lede">${esc(s.name)}</p>
+   <p>Take <b>one photo per shelf</b>, close enough that you can read the spines. Up to 3 photos. Please photograph only the books, no people or car number plates.</p>
+   <div id="pv" class="list"></div>
+   <label class="big red" for="cam" style="cursor:pointer" id="camlabel">Take a photo</label>
+   <input type="file" id="cam" accept="image/*" capture="environment" hidden>
+   <button class="big green" id="send" hidden>Save these photos</button>
+   <p id="msg" class="small" role="status"></p>`;
+  const draw=()=>{ $("#pv").innerHTML=files.map((f,i)=>`<div class="photo"><img src="${f.url}" alt="Shelf photo ${i+1}"></div>
+     <button class="big plain" data-rm="${i}">Remove photo ${i+1}</button>`).join("");
+   $("#pv").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{files.splice(+b.dataset.rm,1);draw();});
+   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#camlabel").hidden=files.length>=3; $("#send").hidden=!files.length; };
+  $("#cam").onchange=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
+   $("#msg").textContent="Getting the photo ready…";
+   try{ const blob=await shrink(f); files.push({blob,url:URL.createObjectURL(blob)}); $("#msg").textContent=""; draw(); }
+   catch(err){ $("#msg").textContent="That photo couldn't be opened. Try taking it again."; } };
+  $("#send").onclick=async()=>{ const btn=$("#send"); btn.disabled=true; $("#camlabel").hidden=true;
+   const paths=[];
+   for(let i=0;i<files.length;i++){
+    $("#msg").textContent=`Sending photo ${i+1} of ${files.length}…`;
+    const path=`${DEVICE}/${Date.now()}-${i}.jpg`;
+    const {error}=await sb.storage.from("shelf-photos").upload(path,files[i].blob,{contentType:"image/jpeg",upsert:false});
+    if(error){ btn.disabled=false; $("#msg").textContent="A photo didn't send. Check you have signal and tap Save again."; return; }
+    paths.push(path);
+   }
+   $("#msg").textContent="Saving…";
+   const {data:vid,error}=await sb.rpc("add_visit",{p_stop:s.id,p_paths:paths,p_note:null,p_device:DEVICE});
+   if(error){ btn.disabled=false; $("#msg").textContent=/too many/.test(error.message)?"This phone has sent a lot of photos in the last hour. Please try again later.":"The photos sent but didn't save to the stop. Tap Save again."; return; }
+   // Check it really saved before saying so.
+   const chk=await sb.from("visits").select("id").eq("id",vid).maybeSingle();
+   if(chk.error||!chk.data){ btn.disabled=false; $("#msg").textContent="We couldn't confirm the save. Tap Save again."; return; }
+   go("thanks",s); };
+ },
+ thanks(s){
+  view.innerHTML=`<div class="done"><h1>Thank you</h1>
+   <p>Your photos of ${esc(s.name)} are saved. Anyone looking at this stop can see them now.</p>
+   <p class="small">The book titles are read from the photos later, so they can be searched.</p></div>
+   <button class="big green" id="see">See ${esc(s.name)}</button>
+   <button class="big plain" id="h">Back to the start</button>`;
+  $("#see").onclick=()=>{history_=[["home"]]; go("stop",s);};
+  $("#h").onclick=()=>{history_=[]; go("home");};
+ },
+ async search(q){
+  busy("Searching…");
+  const {data,error}=await sb.rpc("search_all",{p_q:q,p_lat:here?.lat??null,p_lon:here?.lon??null});
+  if(error) return oops("The search didn't work. Check you have signal.",()=>go("search",q,false));
+  const n=q.toLowerCase(); const hl=x=>esc(x).replace(new RegExp(n.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"ig"),m=>`<mark>${m}</mark>`);
+  view.innerHTML=`<h1>Results for “${esc(q)}”</h1>
+   ${data.length?`<ul class="list">${data.map((h,i)=>`<li><button class="stop" data-i="${i}">
+     <div class="thumb"><div class="shelf" style="background:var(--tint)"></div></div>
+     <div>${h.hit==="place"?`<div class="hit-kind">Place</div><div class="name">${hl(h.stop_name)}</div>${h.place?`<div class="meta">${hl(h.place)}</div>`:""}`
+       :`<div class="hit-kind">Book</div><div class="name">${hl(h.title)}</div>${h.author?`<div class="meta">${hl(h.author)}</div>`:""}<div class="meta">At ${esc(h.stop_name)}, seen ${when(h.seen)}</div>`}
+     ${h.metres!=null?`<div class="meta"><span class="dist">${dist(h.metres)}</span></div>`:""}</div></button></li>`).join("")}</ul>`
+   :`<div class="done"><h2>Nothing found yet</h2><p>No stop name or shelf photo matches that. Try a shorter word, like just the author's surname or the village name.</p></div>`}
+   <button class="big plain" id="again">Search again</button>`;
+  view.querySelectorAll(".stop").forEach(b=>b.onclick=async()=>{ const h=data[+b.dataset.i];
+   const {data:s}=await sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",h.stop_id).maybeSingle();
+   if(s) go("stop",{...s,metres:h.metres}); });
+  $("#again").onclick=()=>{history_=[]; go("home"); $("#q").focus();};
+ }
+};
+
+// Phone photos can be 12+ megapixels. Shrink to the long edge the reader uses (2,576 px) as a JPEG.
+async function shrink(file){
+  const bmp=await createImageBitmap(file,{imageOrientation:"from-image"});
+  const k=Math.min(1,2576/Math.max(bmp.width,bmp.height));
+  const c=document.createElement("canvas"); c.width=Math.round(bmp.width*k); c.height=Math.round(bmp.height*k);
+  c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+  return await new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error("encode")),"image/jpeg",0.88));
+}
+go("home");
+</script>
+
+</body></html>
