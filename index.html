@@ -504,7 +504,7 @@ const SCREENS={
  },
  async stop(s){
   busy("Opening "+s.name+"…");
-  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,note,read_status,created_at,taken_at,condition").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).limit(1);
+  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,note,read_status,created_at,taken_at,condition").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).order("created_at",{ascending:false}).limit(1);
   if(error) return oops("This stop didn't load. Check you have signal.",()=>go("stop",s,false));
   const v=visits[0]; let books=[];
   if(v){ const r=await sb.from("books").select("title,author,confident").eq("visit_id",v.id); books=r.data||[]; }
