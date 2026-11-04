@@ -250,7 +250,9 @@ const $=s=>document.querySelector(s);
 const view=$("#view"),back=$("#back");
 let history_=[]; let here=null; // here = {lat,lon} once the phone has told us
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const dist=m=>m==null?"":(m<1000?`${Math.round(m/80)||1} min walk`:m<20000?`${(m/1000).toFixed(1)} km away`:`${Math.round(m/1000)} km away`);
+// Distances in miles (UK). Under about half a mile, a walking time reads better (80 m a minute).
+const dist=m=>{ if(m==null) return ""; if(m<1000) return `${Math.round(m/80)||1} min walk`;
+  const mi=m/1609.344, t=mi<20?mi.toFixed(1):String(Math.round(mi)); return `${t} ${t==="1.0"||t==="1"?"mile":"miles"} away`; };
 const when=t=>{if(!t)return null;const d=new Date(t),days=Math.floor((Date.now()-d)/864e5);
   return days<1?"today":days<2?"yesterday":days<14?`${days} days ago`:d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});};
 const distance=(a,b)=>{const R=6371000,r=x=>x*Math.PI/180,dl=r(b.lat-a.lat),dn=r(b.lon-a.lon);
