@@ -35,8 +35,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .spine{display:grid;place-items:center;width:30px;border-radius:4px 4px 0 0;font-weight:700;font-size:1.25rem;line-height:1;
   background:var(--c);color:var(--t,var(--on-shelf));box-shadow:inset -4px 0 0 rgb(0 0 0 / .16), inset 0 5px 0 rgb(255 255 255 / .22);
   height:var(--h,54px);transform-origin:bottom center;position:relative;z-index:1}
-.spine.swap-a{z-index:2}
-.spine.swap-b{z-index:0}
+.spine.swap-a,.spine.swap-c{z-index:2}
+.spine.swap-b,.spine.swap-d{z-index:0}
 .shelf-board{height:10px;background:var(--wood);border-top:3px solid var(--wood-dark);margin-top:0}
 .back{all:unset;cursor:pointer;color:var(--on-shelf);font-weight:700;font-size:1.05rem;padding:10px 8px;min-height:44px;display:flex;align-items:center;align-self:center}
 .back[hidden]{display:none!important}
@@ -49,7 +49,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   @keyframes lean{0%,88%,100%{rotate:0deg}92%{rotate:-9deg}96%{rotate:3deg}}
   /* The two S books swap places now and then (it is called Swap Stop): driven from the script
      (startSwap) with measured pixel distances, so it never depends on CSS variables resolving in time. */
-  .spine.swap-a,.spine.swap-b{animation:drop .6s cubic-bezier(.3,1.5,.5,1) both;animation-delay:var(--d,0s)}
+  .spine.swap-a,.spine.swap-b,.spine.swap-c,.spine.swap-d{animation:drop .6s cubic-bezier(.3,1.5,.5,1) both;animation-delay:var(--d,0s)}
   /* Detective, 7s: lifts the glass to his eye, the giant magnified eye looks left, right, blinks,
      spots something (sparkle, eyebrow up), then lowers the glass and gives a little bounce. */
   .icon .det{animation:hop 7s ease-in-out infinite;transform-origin:32px 64px}
@@ -150,12 +150,12 @@ button:disabled{opacity:.6;cursor:wait}
         <span class="spine swap-a" style="--c:var(--s1);--h:56px;--d:.05s;--l:1s">S</span>
         <span class="spine" style="--c:var(--s2);--t:var(--spine-ink);--h:50px;--d:.12s;--l:5s">W</span>
         <span class="spine" style="--c:var(--s3);--h:58px;--d:.19s;--l:3s">A</span>
-        <span class="spine" style="--c:var(--s4);--h:52px;--d:.26s;--l:7s">P</span>
+        <span class="spine swap-c" style="--c:var(--s4);--h:52px;--d:.26s;--l:7s">P</span>
         <span class="gap"></span>
         <span class="spine swap-b" style="--c:var(--s5);--t:var(--spine-ink);--h:55px;--d:.33s;--l:2s">S</span>
         <span class="spine" style="--c:var(--s6);--h:49px;--d:.40s;--l:6s">T</span>
         <span class="spine" style="--c:var(--s7);--h:57px;--d:.47s;--l:4s">O</span>
-        <span class="spine" style="--c:var(--s8);--h:51px;--d:.54s;--l:8s">P</span>
+        <span class="spine swap-d" style="--c:var(--s8);--h:51px;--d:.54s;--l:8s">P</span>
       </span>
     </button>
   </div>
@@ -251,14 +251,19 @@ function deviceId(){
 }
 const DEVICE=deviceId();
 
-// The two S books swap places every 18 s and swap back (first swap ~4 s after opening).
-// Measure the real gap between them, THEN start the movement with that exact distance.
-// The red S hops over in front of the other books; the orange S slides along behind them.
+// The two S books swap places every 18 s and swap back (first swap ~4 s after opening);
+// the two P books do the same, 4.5 s later, so only one pair is ever moving at a time.
+// Measure the real gap between each pair, THEN start the movement with that exact distance.
+// The SWAP book hops over in front of the others; the STOP book slides along behind them.
 let swapAnims=[];
 function startSwap(){
   swapAnims.forEach(x=>x.cancel()); swapAnims=[];
   if(matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const a=document.querySelector(".swap-a"), b=document.querySelector(".swap-b"); if(!a||!b||!a.animate) return;
+  swapPair(".swap-a",".swap-b",4000);
+  swapPair(".swap-c",".swap-d",8500);
+}
+function swapPair(selA,selB,delay){
+  const a=document.querySelector(selA), b=document.querySelector(selB); if(!a||!b||!a.animate) return;
   const dx=b.offsetLeft-a.offsetLeft; if(!dx) return;
   const path=(x,up)=>[
     {offset:0,transform:"translate(0,0)"},{offset:.04,transform:"translate(0,0)"},
@@ -266,8 +271,8 @@ function startSwap(){
     {offset:.19,transform:`translate(${x}px,0)`},{offset:.52,transform:`translate(${x}px,0)`},
     {offset:.56,transform:`translate(${x}px,${up}px)`},{offset:.63,transform:`translate(0,${up}px)`},
     {offset:.67,transform:"translate(0,0)"},{offset:1,transform:"translate(0,0)"}];
-  const opts={duration:18000,iterations:Infinity,delay:4000,easing:"ease-in-out"};
-  swapAnims=[a.animate(path(dx,-14),opts), b.animate(path(-dx,-3),opts)];
+  const opts={duration:18000,iterations:Infinity,delay,easing:"ease-in-out"};
+  swapAnims.push(a.animate(path(dx,-14),opts), b.animate(path(-dx,-3),opts));
 }
 addEventListener("load",startSwap);
 let swapResize; addEventListener("resize",()=>{clearTimeout(swapResize); swapResize=setTimeout(startSwap,300);});
