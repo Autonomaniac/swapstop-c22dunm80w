@@ -47,14 +47,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   .spine{animation:drop .6s cubic-bezier(.3,1.5,.5,1) both, lean 9s ease-in-out infinite;animation-delay:var(--d,0s), calc(var(--d,0s) + var(--l,2s))}
   @keyframes drop{from{transform:translateY(-120%)}to{transform:none}}
   @keyframes lean{0%,88%,100%{rotate:0deg}92%{rotate:-9deg}96%{rotate:3deg}}
-  /* The two S books swap places now and then (it is called Swap Stop), then swap back.
-     The red S hops over the top in front of the others; the orange S slides along behind them.
-     --dx is the gap between the two books, measured in the script. 18s cycle, first swap ~4s in. */
-  .spine.swap-a{animation:drop .6s cubic-bezier(.3,1.5,.5,1) both, swapA 18s ease-in-out 4s infinite}
-  .spine.swap-b{animation:drop .6s cubic-bezier(.3,1.5,.5,1) both, swapB 18s ease-in-out 4s infinite;animation-delay:var(--d,0s),4s}
-  .spine.swap-a{animation-delay:var(--d,0s),4s}
-  @keyframes swapA{0%,4%{translate:0 0}7%{translate:0 -14px}12%{translate:var(--dx) -14px}15%,52%{translate:var(--dx) 0}55%{translate:var(--dx) -14px}60%{translate:0 -14px}63%,100%{translate:0 0}}
-  @keyframes swapB{0%,4%{translate:0 0}7%{translate:0 -3px}12%{translate:calc(var(--dx) * -1) -3px}15%,52%{translate:calc(var(--dx) * -1) 0}55%{translate:calc(var(--dx) * -1) -3px}60%{translate:0 -3px}63%,100%{translate:0 0}}
+  /* The two S books swap places now and then (it is called Swap Stop): driven from the script
+     (startSwap) with measured pixel distances, so it never depends on CSS variables resolving in time. */
+  .spine.swap-a,.spine.swap-b{animation:drop .6s cubic-bezier(.3,1.5,.5,1) both;animation-delay:var(--d,0s)}
   /* Detective, 7s: lifts the glass to his eye, the giant magnified eye looks left, right, blinks,
      spots something (sparkle, eyebrow up), then lowers the glass and gives a little bounce. */
   .icon .det{animation:hop 7s ease-in-out infinite;transform-origin:32px 64px}
@@ -256,10 +251,26 @@ function deviceId(){
 }
 const DEVICE=deviceId();
 
-// Measure the gap between the two S books so the swap lands each one exactly in the other's place.
-function measureSwap(){ const a=document.querySelector(".swap-a"), b=document.querySelector(".swap-b"); if(!a||!b) return;
-  const dx=(b.offsetLeft-a.offsetLeft)+"px"; a.style.setProperty("--dx",dx); b.style.setProperty("--dx",dx); }
-measureSwap(); addEventListener("resize",measureSwap); document.fonts?.ready.then(measureSwap);
+// The two S books swap places every 18 s and swap back (first swap ~4 s after opening).
+// Measure the real gap between them, THEN start the movement with that exact distance.
+// The red S hops over in front of the other books; the orange S slides along behind them.
+let swapAnims=[];
+function startSwap(){
+  swapAnims.forEach(x=>x.cancel()); swapAnims=[];
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const a=document.querySelector(".swap-a"), b=document.querySelector(".swap-b"); if(!a||!b||!a.animate) return;
+  const dx=b.offsetLeft-a.offsetLeft; if(!dx) return;
+  const path=(x,up)=>[
+    {offset:0,transform:"translate(0,0)"},{offset:.04,transform:"translate(0,0)"},
+    {offset:.08,transform:`translate(0,${up}px)`},{offset:.15,transform:`translate(${x}px,${up}px)`},
+    {offset:.19,transform:`translate(${x}px,0)`},{offset:.52,transform:`translate(${x}px,0)`},
+    {offset:.56,transform:`translate(${x}px,${up}px)`},{offset:.63,transform:`translate(0,${up}px)`},
+    {offset:.67,transform:"translate(0,0)"},{offset:1,transform:"translate(0,0)"}];
+  const opts={duration:18000,iterations:Infinity,delay:4000,easing:"ease-in-out"};
+  swapAnims=[a.animate(path(dx,-14),opts), b.animate(path(-dx,-3),opts)];
+}
+addEventListener("load",startSwap);
+let swapResize; addEventListener("resize",()=>{clearTimeout(swapResize); swapResize=setTimeout(startSwap,300);});
 
 const $=s=>document.querySelector(s);
 const view=$("#view"),back=$("#back");
