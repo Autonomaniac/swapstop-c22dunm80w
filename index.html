@@ -34,7 +34,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .brand .gap{width:14px}
 .spine{display:grid;place-items:center;width:30px;border-radius:4px 4px 0 0;font-weight:700;font-size:1.25rem;line-height:1;
   background:var(--c);color:var(--t,var(--on-shelf));box-shadow:inset -4px 0 0 rgb(0 0 0 / .16), inset 0 5px 0 rgb(255 255 255 / .22);
-  height:var(--h,54px);transform-origin:bottom center}
+  height:var(--h,54px);transform-origin:bottom center;position:relative;z-index:1}
+.spine.swap-a{z-index:2}
+.spine.swap-b{z-index:0}
 .shelf-board{height:10px;background:var(--wood);border-top:3px solid var(--wood-dark);margin-top:0}
 .back{all:unset;cursor:pointer;color:var(--on-shelf);font-weight:700;font-size:1.05rem;padding:10px 8px;min-height:44px;display:flex;align-items:center;align-self:center}
 .back[hidden]{display:none!important}
@@ -45,6 +47,14 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   .spine{animation:drop .6s cubic-bezier(.3,1.5,.5,1) both, lean 9s ease-in-out infinite;animation-delay:var(--d,0s), calc(var(--d,0s) + var(--l,2s))}
   @keyframes drop{from{transform:translateY(-120%)}to{transform:none}}
   @keyframes lean{0%,88%,100%{rotate:0deg}92%{rotate:-9deg}96%{rotate:3deg}}
+  /* The two S books swap places now and then (it is called Swap Stop), then swap back.
+     The red S hops over the top in front of the others; the orange S slides along behind them.
+     --dx is the gap between the two books, measured in the script. 18s cycle, first swap ~4s in. */
+  .spine.swap-a{animation:drop .6s cubic-bezier(.3,1.5,.5,1) both, swapA 18s ease-in-out 4s infinite}
+  .spine.swap-b{animation:drop .6s cubic-bezier(.3,1.5,.5,1) both, swapB 18s ease-in-out 4s infinite;animation-delay:var(--d,0s),4s}
+  .spine.swap-a{animation-delay:var(--d,0s),4s}
+  @keyframes swapA{0%,4%{translate:0 0}7%{translate:0 -14px}12%{translate:var(--dx) -14px}15%,52%{translate:var(--dx) 0}55%{translate:var(--dx) -14px}60%{translate:0 -14px}63%,100%{translate:0 0}}
+  @keyframes swapB{0%,4%{translate:0 0}7%{translate:0 -3px}12%{translate:calc(var(--dx) * -1) -3px}15%,52%{translate:calc(var(--dx) * -1) 0}55%{translate:calc(var(--dx) * -1) -3px}60%{translate:0 -3px}63%,100%{translate:0 0}}
   /* Detective, 7s: lifts the glass to his eye, the giant magnified eye looks left, right, blinks,
      spots something (sparkle, eyebrow up), then lowers the glass and gives a little bounce. */
   .icon .det{animation:hop 7s ease-in-out infinite;transform-origin:32px 64px}
@@ -142,12 +152,12 @@ button:disabled{opacity:.6;cursor:wait}
     <button class="back" id="back" hidden aria-label="Go back">‹ Back</button>
     <button class="home-btn" id="home-link" aria-label="Swap Stop home">
       <span class="brand" aria-hidden="true">
-        <span class="spine" style="--c:var(--s1);--h:56px;--d:.05s;--l:1s">S</span>
+        <span class="spine swap-a" style="--c:var(--s1);--h:56px;--d:.05s;--l:1s">S</span>
         <span class="spine" style="--c:var(--s2);--t:var(--spine-ink);--h:50px;--d:.12s;--l:5s">W</span>
         <span class="spine" style="--c:var(--s3);--h:58px;--d:.19s;--l:3s">A</span>
         <span class="spine" style="--c:var(--s4);--h:52px;--d:.26s;--l:7s">P</span>
         <span class="gap"></span>
-        <span class="spine" style="--c:var(--s5);--t:var(--spine-ink);--h:55px;--d:.33s;--l:2s">S</span>
+        <span class="spine swap-b" style="--c:var(--s5);--t:var(--spine-ink);--h:55px;--d:.33s;--l:2s">S</span>
         <span class="spine" style="--c:var(--s6);--h:49px;--d:.40s;--l:6s">T</span>
         <span class="spine" style="--c:var(--s7);--h:57px;--d:.47s;--l:4s">O</span>
         <span class="spine" style="--c:var(--s8);--h:51px;--d:.54s;--l:8s">P</span>
@@ -245,6 +255,11 @@ function deviceId(){
   return id;
 }
 const DEVICE=deviceId();
+
+// Measure the gap between the two S books so the swap lands each one exactly in the other's place.
+function measureSwap(){ const a=document.querySelector(".swap-a"), b=document.querySelector(".swap-b"); if(!a||!b) return;
+  const dx=(b.offsetLeft-a.offsetLeft)+"px"; a.style.setProperty("--dx",dx); b.style.setProperty("--dx",dx); }
+measureSwap(); addEventListener("resize",measureSwap); document.fonts?.ready.then(measureSwap);
 
 const $=s=>document.querySelector(s);
 const view=$("#view"),back=$("#back");
