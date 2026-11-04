@@ -2,6 +2,7 @@
 <title>Swap Stop</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
 /* Layout: one column, phone first. A bookshelf header, two big actions, one search box. One decision per screen. */
 :root{
@@ -124,6 +125,15 @@ input[type=search]{font:1.1rem var(--font);padding:14px 16px;min-height:60px;bor
 .small{font-size:.9rem;color:var(--muted)}
 .hit-kind{font-size:.85rem;font-weight:700;color:var(--muted)}
 button:disabled{opacity:.6;cursor:wait}
+/* Map of every stop */
+#map{height:58vh;min-height:320px;max-height:560px;border-radius:14px;border:2px solid var(--line);z-index:1}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.95rem;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:8px}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid #ffffff;box-shadow:0 0 0 1px #1b1e22}
+.leaflet-popup-content{font:1rem/1.4 var(--font);margin:12px 14px}
+.leaflet-popup-content b{font-size:1.05rem}
+.pop-open{display:block;margin-top:10px;width:100%;min-height:48px;border:0;border-radius:10px;background:var(--green);color:var(--on-green);font:700 1rem var(--font);cursor:pointer}
+.leaflet-container a.leaflet-popup-close-button{font-size:26px;width:34px;height:34px}
 @media (prefers-reduced-motion:no-preference){.big{transition:transform .08s}.big:active{transform:scale(.98)}}
 </style>
 
@@ -153,6 +163,7 @@ button:disabled{opacity:.6;cursor:wait}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 // Our own detective: green trilby, beige trench coat, big nose. He lifts his magnifying glass and a giant eye appears in it.
 const ICON_SEARCH=`<svg class="icon detective" viewBox="0 0 64 64" aria-hidden="true">
@@ -242,6 +253,8 @@ const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 const dist=m=>m==null?"":(m<1000?`${Math.round(m/80)||1} min walk`:`${(m/1000).toFixed(1)} km away`);
 const when=t=>{if(!t)return null;const d=new Date(t),days=Math.floor((Date.now()-d)/864e5);
   return days<1?"today":days<2?"yesterday":days<14?`${days} days ago`:d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});};
+const distance=(a,b)=>{const R=6371000,r=x=>x*Math.PI/180,dl=r(b.lat-a.lat),dn=r(b.lon-a.lon);
+  return 2*R*Math.asin(Math.sqrt(Math.sin(dl/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dn/2)**2));};
 const photoUrl=p=>PHOTO_BASE+p.split("/").map(encodeURIComponent).join("/");
 const thumb=p=>p?`<img src="${photoUrl(p)}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover">`:'<div class="shelf" style="background:var(--tint)"></div>';
 const busy=msg=>{view.innerHTML=`<p class="lede" role="status">${esc(msg)}</p>`;};
@@ -285,15 +298,52 @@ const SCREENS={
   $("#sf").onsubmit=e=>{e.preventDefault(); const q=$("#q").value.trim(); if(q.length>=3) go("search",q); else $("#q").focus();};
  },
  async near(){
-  busy("Finding where you are…");
-  try{ await locate(); }catch(e){ return oops(e.message,()=>go("near",null,false)); }
-  busy("Looking for book stops near you…");
-  const {data,error}=await sb.rpc("stops_near",{p_lat:here.lat,p_lon:here.lon,p_limit:30});
-  if(error) return oops("The book stop list didn't load. Check you have signal.",()=>go("near",null,false));
-  view.innerHTML=`<h1>Book stops near you</h1><p class="lede">Closest first.</p>
-   ${data.length?`<ul class="list">${data.map(s=>stopCard(s,"open")).join("")}</ul>`
-   :`<div class="done"><h2>None mapped near you yet</h2><p>If you know one, add it with "Add a photo of a shelf".</p></div>`}`;
-  wireCards(data);
+  view.innerHTML=`<h1>Book stops</h1>
+   <p class="lede" id="mapnote">Finding where you are…</p>
+   <div id="map" role="region" aria-label="Map of book stops"></div>
+   <div class="legend"><span><i style="background:#d6303b"></i>Book stop</span><span><i style="background:#3f9b4a"></i>Has a shelf photo</span><span><i style="background:#2f73d9"></i>You</span></div>
+   <p class="small">Tap a dot to see the stop. Pinch or use + and − to zoom. Planning a trip? Move the map there and tap the button below.</p>
+   <button class="big plain" id="here-list">List the stops in this part of the map</button>
+   <h2 id="listhead" hidden></h2>
+   <ul class="list" id="nearlist"></ul>`;
+  const map=L.map("map",{preferCanvas:true,zoomControl:true}).fitBounds([[49.9,-6.4],[58.7,1.8]]);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,
+    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}).addTo(map);
+  const showList=async(lat,lon,label)=>{
+   $("#listhead").hidden=false; $("#listhead").textContent="Loading…"; $("#nearlist").innerHTML="";
+   const {data,error}=await sb.rpc("stops_near",{p_lat:lat,p_lon:lon,p_limit:20});
+   if(error){ $("#listhead").textContent="The list didn't load. Check you have signal."; return; }
+   $("#listhead").textContent=label;
+   $("#nearlist").innerHTML=data.length?data.map(s=>stopCard(s,"open")).join(""):'<li class="small">No book stops mapped here yet.</li>';
+   $("#nearlist").querySelectorAll(".stop").forEach(b=>b.onclick=()=>go("stop",data.find(x=>x.id===b.dataset.id)));
+  };
+  $("#here-list").onclick=()=>{ const c=map.getCenter(); showList(c.lat,c.lng,"Stops nearest the middle of the map"); };
+  // All stops as dots. The database hands out at most 1,000 rows per request, so ask in pages.
+  (async()=>{
+   if(!window.__allStops){
+    const pages=await Promise.all([0,1,2,3].map(i=>sb.from("stops").select("id,name,kind,place,lat,lon").range(i*1000,i*1000+999)));
+    const vis=await sb.from("visits").select("stop_id");
+    window.__allStops=pages.flatMap(p=>p.data||[]); window.__withPhoto=new Set((vis.data||[]).map(v=>v.stop_id));
+   }
+   const r=L.canvas({padding:.5});
+   for(const s of window.__allStops){
+    const has=window.__withPhoto.has(s.id);
+    L.circleMarker([s.lat,s.lon],{renderer:r,radius:has?8:6,weight:2,color:"#ffffff",fillColor:has?"#3f9b4a":"#d6303b",fillOpacity:1})
+     .bindPopup(`<b>${esc(s.name)}</b><br>${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}<br>${has?"Has a shelf photo":"No photo yet"}<button class="pop-open" data-stop="${esc(s.id)}">Open this stop</button>`)
+     .addTo(map);
+   }
+  })();
+  map.on("popupopen",e=>{ const b=e.popup.getElement().querySelector(".pop-open"); if(b) b.onclick=()=>{
+   const s=window.__allStops.find(x=>x.id===b.dataset.stop); if(s) go("stop",here?{...s,metres:distance(here,s)}:s); }; });
+  try{
+   await locate();
+   map.setView([here.lat,here.lon],12);
+   L.circleMarker([here.lat,here.lon],{radius:9,weight:3,color:"#ffffff",fillColor:"#2f73d9",fillOpacity:1}).addTo(map).bindPopup("You are here");
+   $("#mapnote").textContent="The map shows where you are. Your nearest stops are listed below it.";
+   showList(here.lat,here.lon,"Nearest to you");
+  }catch(e){
+   $("#mapnote").textContent="Location is off, so here's the whole of the UK. Zoom in to where you're going.";
+  }
  },
  async stop(s){
   busy("Opening "+s.name+"…");
