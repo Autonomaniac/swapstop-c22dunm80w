@@ -666,8 +666,8 @@ const SCREENS={
    <div id="pv" class="list"></div>
    <label class="big red" for="cam" style="cursor:pointer" id="camlabel">Take a photo</label>
    <input type="file" id="cam" accept="image/*" capture="environment" hidden>
-   <label class="big plain" for="pickgal" style="cursor:pointer" id="gallabel">Choose a photo from my phone</label>
-   <input type="file" id="pickgal" accept="image/*" hidden>
+   <label class="big plain" for="pickgal" style="cursor:pointer" id="gallabel">Choose photos from my phone</label>
+   <input type="file" id="pickgal" accept="image/*" multiple hidden>
    <div id="condbox" hidden>
     <p style="font-weight:700;margin-bottom:8px">How's the shelf looking? (you can skip this)</p>
     <div class="cond" id="cond">
@@ -682,16 +682,23 @@ const SCREENS={
   const draw=()=>{ $("#pv").innerHTML=files.map((f,i)=>`<div class="photo"><img src="${f.url}" alt="Shelf photo ${i+1}"></div>
      <button class="big plain" data-rm="${i}">Remove photo ${i+1}</button>`).join("");
    $("#pv").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{files.splice(+b.dataset.rm,1);draw();});
-   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; $("#condbox").hidden=!files.length; };
+   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#gallabel").textContent=files.length?"Choose more photos from my phone":"Choose photos from my phone"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; $("#condbox").hidden=!files.length; };
   let condition=null;
   view.querySelectorAll("#cond button").forEach(b=>b.onclick=()=>{
    condition=condition===b.dataset.c?null:b.dataset.c;
    view.querySelectorAll("#cond button").forEach(x=>x.setAttribute("aria-pressed",String(x.dataset.c===condition))); });
-  const addFile=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
-   $("#msg").textContent="Getting the photo ready…";
-   const meta=await readExif(f).catch(()=>({}));
-   try{ const blob=await shrink(f); files.push({blob,url:URL.createObjectURL(blob),taken:meta.taken||null}); $("#msg").textContent=""; draw(); }
-   catch(err){ $("#msg").textContent="That photo couldn't be opened. Try again."; } };
+  // Adds one photo from the camera, or several from the gallery, never more than 3 in total.
+  const addFile=async e=>{ const room=3-files.length; const picked=[...e.target.files]; e.target.value=""; if(!picked.length) return;
+   const take=picked.slice(0,room);
+   $("#msg").textContent=take.length>1?"Getting the photos ready…":"Getting the photo ready…";
+   let failed=0;
+   for(const f of take){
+    const meta=await readExif(f).catch(()=>({}));
+    try{ const blob=await shrink(f); files.push({blob,url:URL.createObjectURL(blob),taken:meta.taken||null}); }catch(err){ failed++; }
+   }
+   draw();
+   $("#msg").textContent=failed?"One of those photos couldn't be opened. Try choosing it again."
+     :picked.length>room?`Only ${room===1?"1 more photo fits":room+" more photos fit"}, so the first ${room} were added.`:""; };
   $("#cam").onchange=addFile; $("#pickgal").onchange=addFile; draw();
   $("#send").onclick=async()=>{ const btn=$("#send"); btn.disabled=true; $("#camlabel").hidden=true; $("#gallabel").hidden=true;
    const v={id:`${Date.now()}-${Math.random().toString(36).slice(2,8)}`, stop:{id:s.id,name:s.name,kind:s.kind,place:s.place,lat:s.lat,lon:s.lon},
