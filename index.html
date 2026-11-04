@@ -250,7 +250,7 @@ const $=s=>document.querySelector(s);
 const view=$("#view"),back=$("#back");
 let history_=[]; let here=null; // here = {lat,lon} once the phone has told us
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const dist=m=>m==null?"":(m<1000?`${Math.round(m/80)||1} min walk`:`${(m/1000).toFixed(1)} km away`);
+const dist=m=>m==null?"":(m<1000?`${Math.round(m/80)||1} min walk`:m<20000?`${(m/1000).toFixed(1)} km away`:`${Math.round(m/1000)} km away`);
 const when=t=>{if(!t)return null;const d=new Date(t),days=Math.floor((Date.now()-d)/864e5);
   return days<1?"today":days<2?"yesterday":days<14?`${days} days ago`:d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});};
 const distance=(a,b)=>{const R=6371000,r=x=>x*Math.PI/180,dl=r(b.lat-a.lat),dn=r(b.lon-a.lon);
@@ -307,12 +307,16 @@ const SCREENS={
    <h2 id="listhead" hidden></h2>
    <ul class="list" id="nearlist"></ul>`;
   const map=L.map("map",{preferCanvas:true,zoomControl:true,tapTolerance:20}).fitBounds([[49.9,-6.4],[58.7,1.8]]);
+  window.__map=map; // handle for testing
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,
     attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}).addTo(map);
   const showList=async(lat,lon,label)=>{
    $("#listhead").hidden=false; $("#listhead").textContent="Loading…"; $("#nearlist").innerHTML="";
    const {data,error}=await sb.rpc("stops_near",{p_lat:lat,p_lon:lon,p_limit:20});
    if(error){ $("#listhead").textContent="The list didn't load. Check you have signal."; return; }
+   // The database measured from the middle of the map, which is only right for sorting.
+   // Every distance shown to the person is from where THEY are, or not shown at all.
+   data.forEach(s=>{ s.metres=here?distance(here,s):null; });
    $("#listhead").textContent=label;
    $("#nearlist").innerHTML=data.length?data.map(s=>stopCard(s,"open")).join(""):'<li class="small">No book stops mapped here yet.</li>';
    $("#nearlist").querySelectorAll(".stop").forEach(b=>b.onclick=()=>go("stop",data.find(x=>x.id===b.dataset.id)));
