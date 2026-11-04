@@ -366,7 +366,7 @@ const nearestFromCache=async(pt,n)=>(await getAllStops()).map(s=>({...s,metres:d
 async function getFreshness(){ const {data}=await sb.rpc("stop_freshness"); const m=new Map(); (data||[]).forEach(r=>m.set(r.stop_id,r)); return m; }
 const AGE={fresh:"#3f9b4a",month:"#e0a400",none:"#d6303b"};
 const ageColour=seen=>{ if(!seen) return AGE.none; const d=(Date.now()-new Date(seen))/864e5; return d<8?AGE.fresh:d<31?AGE.month:AGE.none; };
-const CONDITION_LABEL={full:"Shelf is full",needs_books:"Needs more books",empty:"Shelf is empty",damaged:"Wet or damaged"};
+const CONDITION_LABEL={full:"Well stocked",needs_books:"Needs more books",empty:"Shelf is empty",damaged:"Wet or damaged"};
 
 // ---- Photos waiting to send. Kept on the phone (IndexedDB) until there's signal, then sent automatically.
 const idb=()=>new Promise((res,rej)=>{ const r=indexedDB.open("swapstop",1);
@@ -671,7 +671,7 @@ const SCREENS={
    <div id="condbox" hidden>
     <p style="font-weight:700;margin-bottom:8px">How's the shelf looking? (you can skip this)</p>
     <div class="cond" id="cond">
-     <button data-c="full" aria-pressed="false">Full</button>
+     <button data-c="full" aria-pressed="false">Well stocked</button>
      <button data-c="needs_books" aria-pressed="false">Needs books</button>
      <button data-c="empty" aria-pressed="false">Empty</button>
      <button data-c="damaged" aria-pressed="false">Wet or damaged</button>
