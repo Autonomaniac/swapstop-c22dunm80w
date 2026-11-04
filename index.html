@@ -306,7 +306,7 @@ const SCREENS={
    <button class="big plain" id="here-list">List the stops in this part of the map</button>
    <h2 id="listhead" hidden></h2>
    <ul class="list" id="nearlist"></ul>`;
-  const map=L.map("map",{preferCanvas:true,zoomControl:true}).fitBounds([[49.9,-6.4],[58.7,1.8]]);
+  const map=L.map("map",{preferCanvas:true,zoomControl:true,tapTolerance:20}).fitBounds([[49.9,-6.4],[58.7,1.8]]);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,
     attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}).addTo(map);
   const showList=async(lat,lon,label)=>{
@@ -325,20 +325,29 @@ const SCREENS={
     const vis=await sb.from("visits").select("stop_id");
     window.__allStops=pages.flatMap(p=>p.data||[]); window.__withPhoto=new Set((vis.data||[]).map(v=>v.stop_id));
    }
-   const r=L.canvas({padding:.5});
+   // tolerance: the tappable area reaches 16 px beyond each dot, so a fingertip doesn't have to land exactly on it.
+   const r=L.canvas({padding:.5,tolerance:16});
    for(const s of window.__allStops){
     const has=window.__withPhoto.has(s.id);
-    L.circleMarker([s.lat,s.lon],{renderer:r,radius:has?8:6,weight:2,color:"#ffffff",fillColor:has?"#3f9b4a":"#d6303b",fillOpacity:1})
+    s._m=L.circleMarker([s.lat,s.lon],{renderer:r,radius:has?8:6,weight:2,color:"#ffffff",fillColor:has?"#3f9b4a":"#d6303b",fillOpacity:1})
      .bindPopup(`<b>${esc(s.name)}</b><br>${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}<br>${has?"Has a shelf photo":"No photo yet"}<button class="pop-open" data-stop="${esc(s.id)}">Open this stop</button>`)
      .addTo(map);
    }
   })();
+  // Backstop for phones: a tap on the map that missed every dot opens the nearest stop within about a fingertip.
+  map.on("click",e=>{
+   if(!window.__allStops) return;
+   const p=map.latLngToContainerPoint(e.latlng); let best=null,bd=40;
+   for(const s of window.__allStops){ const q=map.latLngToContainerPoint([s.lat,s.lon]); const d=Math.hypot(q.x-p.x,q.y-p.y); if(d<bd){bd=d;best=s;} }
+   if(best&&best._m) best._m.openPopup();
+  });
   map.on("popupopen",e=>{ const b=e.popup.getElement().querySelector(".pop-open"); if(b) b.onclick=()=>{
    const s=window.__allStops.find(x=>x.id===b.dataset.stop); if(s) go("stop",here?{...s,metres:distance(here,s)}:s); }; });
   try{
    await locate();
    map.setView([here.lat,here.lon],12);
-   L.circleMarker([here.lat,here.lon],{radius:9,weight:3,color:"#ffffff",fillColor:"#2f73d9",fillOpacity:1}).addTo(map).bindPopup("You are here");
+   // The "you" dot ignores taps, so standing at a stop doesn't hide the stop's own dot from your finger.
+   L.circleMarker([here.lat,here.lon],{radius:9,weight:3,color:"#ffffff",fillColor:"#2f73d9",fillOpacity:.85,interactive:false}).addTo(map);
    $("#mapnote").textContent="The map shows where you are. Your nearest stops are listed below it.";
    showList(here.lat,here.lon,"Nearest to you");
   }catch(e){
