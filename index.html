@@ -281,7 +281,7 @@ const SCREENS={
     <input type="search" id="q" placeholder="For example: Rebecca, or Cubert" autocomplete="off" enterkeyhint="search"></label></form>
    <p class="small">2,405 book stops across the UK. Anyone can add a photo, no account needed.</p>`;
   $("#near").onclick=()=>go("near");
-  $("#add").onclick=()=>go("pick");
+  $("#add").onclick=()=>go("how");
   $("#sf").onsubmit=e=>{e.preventDefault(); const q=$("#q").value.trim(); if(q.length>=3) go("search",q); else $("#q").focus();};
  },
  async near(){
@@ -297,14 +297,14 @@ const SCREENS={
  },
  async stop(s){
   busy("Opening "+s.name+"…");
-  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,note,read_status,created_at").eq("stop_id",s.id).order("created_at",{ascending:false}).limit(1);
+  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,note,read_status,created_at,taken_at").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).limit(1);
   if(error) return oops("This stop didn't load. Check you have signal.",()=>go("stop",s,false));
   const v=visits[0]; let books=[];
   if(v){ const r=await sb.from("books").select("title,author,confident").eq("visit_id",v.id); books=r.data||[]; }
   const where=`${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}${s.metres!=null?" · "+dist(s.metres):""}`;
   view.innerHTML=`<h1>${esc(s.name)}</h1><p class="lede">${where}</p>
    ${v?`${v.photo_paths.map((p,i)=>`<div class="photo" role="button" tabindex="0" data-ph aria-label="Shelf photo ${i+1}. Tap to make it bigger"><img src="${photoUrl(p)}" alt="Shelf photo ${i+1}"></div>`).join("")}
-     <p class="caption">Photo taken ${when(v.created_at)}. Tap a photo to make it bigger. Books change often, so some may have gone.</p>
+     <p class="caption">Photo taken ${when(v.taken_at||v.created_at)}. Tap a photo to make it bigger. Books change often, so some may have gone.</p>
      <h2>Books on the shelf</h2>
      ${books.length?`<ul class="books">${books.map(b=>`<li><span class="t">${esc(b.title)}</span>${b.author?`<span class="a">${esc(b.author)}</span>`:""}${b.confident?"":'<span class="unsure">Spine hard to read, best guess</span>'}</li>`).join("")}</ul>`
        :`<p class="small">${v.read_status==="waiting"?"The book titles haven't been read from this photo yet. Zoom into the photo to see them.":"No titles could be read from this photo. Zoom into the photo to see them."}</p>`}`
@@ -321,6 +321,68 @@ const SCREENS={
     if(error){ r.disabled=false; r.textContent="Report didn't send. Tap to try again"; return; }
     r.hidden=true; $("#reported").hidden=false; };
  },
+ how(){
+  view.innerHTML=`<h1>Add a photo of a shelf</h1>
+   <p class="lede">You can take one now, or use a photo you took earlier, for example where there was no signal.</p>
+   <div class="actions">
+    <button class="big red" id="now">I'm at the stop now</button>
+    <button class="big green" id="later">Use a photo already on my phone</button>
+   </div>`;
+  $("#now").onclick=()=>go("pick");
+  $("#later").onclick=()=>go("gallery");
+ },
+ gallery(){
+  view.innerHTML=`<h1>Choose your shelf photos</h1>
+   <p class="lede">Pick up to 3 photos of the same stop, one per shelf.</p>
+   <label class="big green" for="gal" style="cursor:pointer">Choose photos</label>
+   <input type="file" id="gal" accept="image/*" multiple hidden>
+   <p id="msg" class="small" role="status"></p>`;
+  $("#gal").onchange=async e=>{ const picked=[...e.target.files].slice(0,3); e.target.value=""; if(!picked.length) return;
+   $("#msg").textContent="Getting the photos ready…";
+   const files=[]; let gps=null;
+   for(const f of picked){
+    const meta=await readExif(f).catch(()=>({}));
+    if(!gps&&meta.gps) gps=meta.gps;
+    try{ const blob=await shrink(f); files.push({blob,url:URL.createObjectURL(blob),taken:meta.taken||null}); }
+    catch(err){ $("#msg").textContent="One of those photos couldn't be opened. Try choosing it again."; return; }
+   }
+   go("whichstop",{files,gps});
+  };
+ },
+ async whichstop({files,gps}){
+  const taken=files.map(f=>f.taken).filter(Boolean).sort()[0];
+  const intro=`${taken?`<p class="lede">These photos were taken ${when(taken)}.</p>`:""}`;
+  const toPhoto=s=>go("photo",{...s,preset:files});
+  if(gps){
+   busy("Finding the stops where these photos were taken…");
+   const {data,error}=await sb.rpc("stops_near",{p_lat:gps.lat,p_lon:gps.lon,p_limit:6});
+   if(error) return oops("The book stop list didn't load. Check you have signal.",()=>go("whichstop",{files,gps},false));
+   view.innerHTML=`<h1>Which stop is it?</h1>${intro}
+    <p class="lede">These stops are closest to where the photos were taken.</p>
+    <ul class="list">${data.map(s=>stopCard(s,"pick")).join("")}</ul>
+    <button class="big plain" id="new">It isn't on the list</button>
+    <button class="big plain" id="byname">Search for it by name instead</button>`;
+   view.querySelectorAll(".stop").forEach(b=>b.onclick=()=>toPhoto(data.find(x=>x.id===b.dataset.id)));
+   $("#new").onclick=()=>go("newstop",{at:gps,preset:files});
+   $("#byname").onclick=()=>go("whichstop",{files,gps:null});
+   return;
+  }
+  view.innerHTML=`<h1>Which stop is it?</h1>${intro}
+   <p class="lede">Type the name of the stop or the village it's in.</p>
+   <form id="wf"><label class="field" for="wq">Stop or village
+    <input type="search" id="wq" placeholder="For example: Cubert" autocomplete="off" enterkeyhint="search"></label></form>
+   <ul class="list" id="wl"></ul>
+   <p class="small">To add a stop that isn't on the map yet, you need to be standing at it, or use a photo that saved its location.</p>`;
+  $("#wf").onsubmit=async e=>{ e.preventDefault(); const q=$("#wq").value.trim(); if(q.length<3) return;
+   const {data,error}=await sb.rpc("search_all",{p_q:q,p_lat:here?.lat??null,p_lon:here?.lon??null});
+   const places=(data||[]).filter(h=>h.hit==="place");
+   $("#wl").innerHTML=error?'<li class="small">The search didn\'t work. Check you have signal.</li>'
+    :places.length?places.map((h,i)=>`<li><button class="stop" data-i="${i}"><div class="thumb"><div class="shelf" style="background:var(--tint)"></div></div>
+      <div><div class="name">${esc(h.stop_name)}</div>${h.place?`<div class="meta">${esc(h.place)}</div>`:""}</div></button></li>`).join("")
+    :'<li class="small">No stop with that name. Try just the village name.</li>';
+   $("#wl").querySelectorAll(".stop").forEach(b=>b.onclick=()=>{const h=places[+b.dataset.i]; toPhoto({id:h.stop_id,name:h.stop_name,place:h.place});});
+  };
+ },
  async pick(){
   busy("Finding where you are…");
   try{ await locate(); }catch(e){ return oops(e.message,()=>go("pick",null,false)); }
@@ -332,9 +394,10 @@ const SCREENS={
    <button class="big plain" id="new">My stop isn't on the list</button>`;
   wireCards(data); $("#new").onclick=()=>go("newstop");
  },
- newstop(){
+ newstop(opt){
+  const at=opt?.at||null, preset=opt?.preset||null;
   view.innerHTML=`<h1>Add your stop</h1>
-   <p class="lede">You need to be standing at it, so the map puts it in the right place.</p>
+   <p class="lede">${at?"We'll put it where your photo was taken.":"You need to be standing at it, so the map puts it in the right place."}</p>
    <label class="field" for="sname">What is it called?
     <input type="search" id="sname" placeholder="For example: Cubert bus shelter" maxlength="80" autocomplete="off"></label>
    <p style="font-weight:700">What is it?</p>
@@ -346,37 +409,46 @@ const SCREENS={
    <p id="msg" class="small" role="status"></p>`;
   view.querySelectorAll("#kinds button").forEach(b=>b.onclick=async()=>{
    const name=$("#sname").value.trim(); if(name.length<2){ $("#msg").textContent="Please type a name for the stop first."; $("#sname").focus(); return; }
-   $("#msg").textContent="Checking where you are…";
-   try{ await locate(); }catch(e){ $("#msg").textContent=e.message; return; }
-   if(here.acc>60){ $("#msg").textContent=`Your phone only knows where you are to within ${Math.round(here.acc)} metres. Step outside or wait a moment, then tap again.`; return; }
-   const {data,error}=await sb.rpc("add_stop",{p_name:name,p_kind:b.dataset.k,p_place:null,p_lat:here.lat,p_lon:here.lon,p_device:DEVICE});
+   let pt=at;
+   if(!pt){
+    $("#msg").textContent="Checking where you are…";
+    try{ await locate(); }catch(e){ $("#msg").textContent=e.message; return; }
+    if(here.acc>60){ $("#msg").textContent=`Your phone only knows where you are to within ${Math.round(here.acc)} metres. Step outside or wait a moment, then tap again.`; return; }
+    pt=here;
+   }
+   const {data,error}=await sb.rpc("add_stop",{p_name:name,p_kind:b.dataset.k,p_place:null,p_lat:pt.lat,p_lon:pt.lon,p_device:DEVICE});
    if(error){ $("#msg").textContent=/too many/.test(error.message)?"This phone has added a lot of stops today. Please try again tomorrow.":"The stop didn't save. Check you have signal and tap again."; return; }
    if(!data.ok){ const s={id:data.existing_id,name:data.existing_name,kind:b.dataset.k};
      view.innerHTML=`<div class="done"><h2>This stop is already on the map</h2><p>It's called "${esc(s.name)}". We'll add your photo to it, so all the photos stay together.</p></div>
       <button class="big green" id="useit">Add my photo to ${esc(s.name)}</button>`;
-     $("#useit").onclick=()=>go("photo",s); return; }
-   go("photo",{id:data.id,name,kind:b.dataset.k,place:null});
+     $("#useit").onclick=()=>go("photo",{...s,preset}); return; }
+   go("photo",{id:data.id,name,kind:b.dataset.k,place:null,preset});
   });
  },
  photo(s){
-  let files=[];
-  view.innerHTML=`<h1>Take photos of the shelves</h1>
+  let files=s.preset?[...s.preset]:[];
+  view.innerHTML=`<h1>${files.length?"Check your photos":"Take photos of the shelves"}</h1>
    <p class="lede">${esc(s.name)}</p>
-   <p>Take <b>one photo per shelf</b>, close enough that you can read the spines. Up to 3 photos. Please photograph only the books, no people or car number plates.</p>
+   <p>Use <b>one photo per shelf</b>, close enough that you can read the spines. Up to 3 photos. Please photograph only the books, no people or car number plates.</p>
    <div id="pv" class="list"></div>
    <label class="big red" for="cam" style="cursor:pointer" id="camlabel">Take a photo</label>
    <input type="file" id="cam" accept="image/*" capture="environment" hidden>
+   <label class="big plain" for="pickgal" style="cursor:pointer" id="gallabel">Choose a photo from my phone</label>
+   <input type="file" id="pickgal" accept="image/*" hidden>
    <button class="big green" id="send" hidden>Save these photos</button>
    <p id="msg" class="small" role="status"></p>`;
   const draw=()=>{ $("#pv").innerHTML=files.map((f,i)=>`<div class="photo"><img src="${f.url}" alt="Shelf photo ${i+1}"></div>
      <button class="big plain" data-rm="${i}">Remove photo ${i+1}</button>`).join("");
    $("#pv").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{files.splice(+b.dataset.rm,1);draw();});
-   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#camlabel").hidden=files.length>=3; $("#send").hidden=!files.length; };
-  $("#cam").onchange=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
+   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; };
+  const addFile=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
    $("#msg").textContent="Getting the photo ready…";
-   try{ const blob=await shrink(f); files.push({blob,url:URL.createObjectURL(blob)}); $("#msg").textContent=""; draw(); }
-   catch(err){ $("#msg").textContent="That photo couldn't be opened. Try taking it again."; } };
-  $("#send").onclick=async()=>{ const btn=$("#send"); btn.disabled=true; $("#camlabel").hidden=true;
+   const meta=await readExif(f).catch(()=>({}));
+   try{ const blob=await shrink(f); files.push({blob,url:URL.createObjectURL(blob),taken:meta.taken||null}); $("#msg").textContent=""; draw(); }
+   catch(err){ $("#msg").textContent="That photo couldn't be opened. Try again."; } };
+  $("#cam").onchange=addFile; $("#pickgal").onchange=addFile; draw();
+  $("#send").onclick=async()=>{ const btn=$("#send"); btn.disabled=true; $("#camlabel").hidden=true; $("#gallabel").hidden=true;
+   const takenAt=files.map(f=>f.taken).filter(Boolean).sort()[0]||null;
    const paths=[];
    for(let i=0;i<files.length;i++){
     $("#msg").textContent=`Sending photo ${i+1} of ${files.length}…`;
@@ -386,7 +458,7 @@ const SCREENS={
     paths.push(path);
    }
    $("#msg").textContent="Saving…";
-   const {data:vid,error}=await sb.rpc("add_visit",{p_stop:s.id,p_paths:paths,p_note:null,p_device:DEVICE});
+   const {data:vid,error}=await sb.rpc("add_visit",{p_stop:s.id,p_paths:paths,p_note:null,p_device:DEVICE,p_taken:takenAt});
    if(error){ btn.disabled=false; $("#msg").textContent=/too many/.test(error.message)?"This phone has sent a lot of photos in the last hour. Please try again later.":"The photos sent but didn't save to the stop. Tap Save again."; return; }
    // Check it really saved before saying so.
    const chk=await sb.from("visits").select("id").eq("id",vid).maybeSingle();
@@ -421,6 +493,38 @@ const SCREENS={
   $("#again").onclick=()=>{history_=[]; go("home"); $("#q").focus();};
  }
 };
+
+// Read when and where a photo was taken from its EXIF block (JPEG only). We only READ it here:
+// the photo we upload is redrawn on a canvas, which drops all metadata, including the location.
+async function readExif(file){
+  const buf=new DataView(await file.slice(0,262144).arrayBuffer());
+  if(buf.getUint16(0)!==0xFFD8) return {};
+  let o=2;
+  while(o+4<buf.byteLength){
+    const marker=buf.getUint16(o), len=buf.getUint16(o+2);
+    if(marker===0xFFE1 && buf.getUint32(o+4)===0x45786966){ // "Exif"
+      const t=o+10, le=buf.getUint16(t)===0x4949;
+      const u16=p=>buf.getUint16(t+p,le), u32=p=>buf.getUint32(t+p,le);
+      const ifd=p=>{const n=u16(p),m={};for(let i=0;i<n;i++){const e=p+2+i*12;m[u16(e)]={type:u16(e+2),count:u32(e+4),off:e+8};}return m;};
+      const val=en=>en.count*({2:1,5:8}[en.type]||4)>4?u32(en.off):en.off;
+      const ascii=en=>{let s="",p=val(en);for(let i=0;i<en.count-1;i++)s+=String.fromCharCode(buf.getUint8(t+p+i));return s;};
+      const rat=(p,i)=>u32(p+i*8)/(u32(p+i*8+4)||1);
+      const dms=en=>{const p=val(en);return rat(p,0)+rat(p,1)/60+rat(p,2)/3600;};
+      const out={}; const ifd0=ifd(u32(4));
+      if(ifd0[0x8769]){ const ex=ifd(u32(ifd0[0x8769].off)); const d=ex[0x9003]||ex[0x9004];
+        if(d){ const m=ascii(d).match(/^(\d{4}):(\d\d):(\d\d) (\d\d):(\d\d):(\d\d)/);
+          if(m){ const dt=new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]); if(!isNaN(dt)&&dt<=new Date()) out.taken=dt.toISOString(); } } }
+      if(ifd0[0x8825]){ const g=ifd(u32(ifd0[0x8825].off));
+        if(g[2]&&g[4]){ let lat=dms(g[2]),lon=dms(g[4]);
+          if(g[1]&&String.fromCharCode(buf.getUint8(g[1].off+t))==="S") lat=-lat;
+          if(g[3]&&String.fromCharCode(buf.getUint8(g[3].off+t))==="W") lon=-lon;
+          if(lat>49&&lat<61&&lon>-9&&lon<2.5) out.gps={lat,lon}; } }
+      return out;
+    }
+    if((marker&0xFF00)!==0xFF00) break; o+=2+len;
+  }
+  return {};
+}
 
 // Phone photos can be 12+ megapixels. Shrink to the long edge the reader uses (2,576 px) as a JPEG.
 async function shrink(file){
