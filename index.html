@@ -390,6 +390,8 @@ async function sendVisit(v,progress){
   if(error) throw Object.assign(new Error(/too many/.test(error.message)?"toomany":"save"),{offline:!navigator.onLine});
   const chk=await sb.from("visits").select("id").eq("id",vid).maybeSingle();
   if(chk.error||!chk.data) throw new Error("confirm");
+  // Ask for the book titles to be read. Not awaited: the reader works on its own, and the visit is already saved.
+  sb.functions.invoke("read-spines",{body:{visit_id:vid}}).catch(()=>{});
   return vid;
 }
 let flushing=false;
@@ -515,7 +517,7 @@ const SCREENS={
      ${v.condition?`<p class="condline">${CONDITION_LABEL[v.condition]} (${when(v.taken_at||v.created_at)})</p>`:""}
      <h2>Books on the shelf</h2>
      ${books.length?`<ul class="books">${books.map(b=>`<li><span class="t">${esc(b.title)}</span>${b.author?`<span class="a">${esc(b.author)}</span>`:""}${b.confident?"":'<span class="unsure">Spine hard to read, best guess</span>'}</li>`).join("")}</ul>`
-       :`<p class="small">${v.read_status==="waiting"?"The book titles haven't been read from this photo yet. Zoom into the photo to see them.":"No titles could be read from this photo. Zoom into the photo to see them."}</p>`}`
+       :`<p class="small">${v.read_status==="waiting"?"The book titles are being read from this photo. Check back in a minute, or zoom into the photo to see them.":"No titles could be read from this photo. A close-up of the books works best. Zoom into the photo to see them."}</p>`}`
    :`<div class="done"><h2>No photo yet</h2><p>Be the first to show what's on this shelf.</p></div>`}
    <div class="actions">
     <a class="big plain" href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}" target="_blank" rel="noopener">Get directions</a>
@@ -660,11 +662,12 @@ const SCREENS={
  },
  photo(s){
   let files=s.preset?[...s.preset]:[];
-  view.innerHTML=`<h1>${files.length?"Check your photos":"Take photos of the shelves"}</h1>
+  view.innerHTML=`<h1>${files.length?"Check your photos":"Take a close-up of the books"}</h1>
    <p class="lede">${esc(s.name)}</p>
-   <p>Use <b>one photo per shelf</b>, close enough that you can read the spines. Up to 3 photos. Please photograph only the books, no people or car number plates.</p>
+   <p><b>Stand close, so the books fill the photo</b> and you could read the titles yourself. That's how the titles get read, so people can search for them. A photo of the whole phone box or shelter is too far away.</p>
+   <p class="small">One photo per shelf, up to 3. Please photograph only the books, no people or car number plates.</p>
    <div id="pv" class="list"></div>
-   <label class="big red" for="cam" style="cursor:pointer" id="camlabel">Take a photo</label>
+   <label class="big red" for="cam" style="cursor:pointer" id="camlabel">Take a close-up</label>
    <input type="file" id="cam" accept="image/*" capture="environment" hidden>
    <label class="big plain" for="pickgal" style="cursor:pointer" id="gallabel">Choose photos from my phone</label>
    <input type="file" id="pickgal" accept="image/*" multiple hidden>
@@ -682,7 +685,7 @@ const SCREENS={
   const draw=()=>{ $("#pv").innerHTML=files.map((f,i)=>`<div class="photo"><img src="${f.url}" alt="Shelf photo ${i+1}"></div>
      <button class="big plain" data-rm="${i}">Remove photo ${i+1}</button>`).join("");
    $("#pv").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{files.splice(+b.dataset.rm,1);draw();});
-   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#gallabel").textContent=files.length?"Choose more photos from my phone":"Choose photos from my phone"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; $("#condbox").hidden=!files.length; };
+   $("#camlabel").textContent=files.length?"Take another close-up":"Take a close-up"; $("#gallabel").textContent=files.length?"Choose more photos from my phone":"Choose photos from my phone"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; $("#condbox").hidden=!files.length; };
   let condition=null;
   view.querySelectorAll("#cond button").forEach(b=>b.onclick=()=>{
    condition=condition===b.dataset.c?null:b.dataset.c;
@@ -719,7 +722,7 @@ const SCREENS={
    <p>They'll send by themselves the next time Swap Stop is open and you have signal. You don't need to do anything else.</p></div>`
    :`<div class="done"><h1>Thank you</h1>
    <p>Your photos of ${esc(s.name)} are saved. Anyone looking at this stop can see them now.</p>
-   <p class="small">The book titles are read from the photos later, so they can be searched.</p></div>`)+`
+   <p class="small">The book titles are read from the photos in about a minute, so people can search for them.</p></div>`)+`
    <button class="big green" id="see">See ${esc(s.name)}</button>
    <button class="big plain" id="h">Back to the start</button>`;
   $("#see").onclick=()=>{history_=[["home"]]; go("stop",s);};
