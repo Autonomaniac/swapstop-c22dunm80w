@@ -122,6 +122,12 @@ input[type=search]{font:1.1rem var(--font);padding:14px 16px;min-height:60px;bor
 .caption{font-size:.9rem;color:var(--muted)}
 
 .books{list-style:none;margin:0;padding:0;border-top:2px solid var(--line)}
+/* Owner page cards */
+.olist .oc{border:2px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:6px}
+.olist .oc.ohid{opacity:.75;border-style:dashed}
+.ophotos{display:flex;gap:8px;overflow-x:auto}.ophotos img{height:110px;width:auto;border-radius:8px;display:block}
+.otag{font-size:.8rem;background:#d6303b;color:#fff;border-radius:6px;padding:1px 6px;vertical-align:middle}
+.olist .row .big{min-height:52px;font-size:1rem}
 .books li{padding:12px 0;border-bottom:2px solid var(--line);display:grid;gap:2px}
 .books .t{font-weight:700}
 .books .a{color:var(--muted);font-size:.95rem}
@@ -268,6 +274,9 @@ const ICON_CAMERA=`<svg class="icon detective snap" viewBox="0 0 64 64" aria-hid
 const SB_URL="https://veqxevwnxdplnccttyno.supabase.co";
 const SB_KEY="sb_publishable_bzlf8I8clINOnP_q4B1TAA_XJ8EFu08";
 const sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:false}});
+// The owner gets a second client that DOES keep a sign-in (only created on the owner page; the public client never signs in).
+let ownerSb=null;
+const ownerClient=()=>ownerSb||(ownerSb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,detectSessionInUrl:true,storageKey:"swapstop-owner"}}));
 const PHOTO_BASE=SB_URL+"/storage/v1/object/public/shelf-photos/";
 const KIND_LABEL={phone_box:"Phone box",bus_shelter:"Bus shelter",other:"Book swap"};
 
@@ -728,6 +737,75 @@ const SCREENS={
   $("#see").onclick=()=>{history_=[["home"]]; go("stop",s);};
   $("#h").onclick=()=>{history_=[]; go("home");};
  },
+ // ---- Owner page (Mark only). Reached by ?owner=1, linked from nowhere. The database decides who is the owner:
+ // every owner_* function checks the signed-in email against public.owners, so this page is only a viewer.
+ async owner(){
+  const os=ownerClient();
+  const {data:{session}}=await os.auth.getSession();
+  if(!session){
+   view.innerHTML=`<h1>Owner sign-in</h1>
+    <p class="lede">We'll email you a link. Tap it on this device to sign in. No password.</p>
+    <form id="of"><label class="field" for="oe">Your email
+     <input type="email" id="oe" autocomplete="email" required></label>
+     <button class="big green" type="submit">Email me a sign-in link</button></form>
+    <p id="msg" class="small" role="status"></p>`;
+   $("#of").onsubmit=async e=>{ e.preventDefault(); const email=$("#oe").value.trim(); $("#msg").textContent="Sending…";
+    const {error}=await os.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname+"?owner=1"}});
+    $("#msg").textContent=error?("That didn't send: "+error.message):"Sent. Check your email and tap the link (it may take a minute, and check spam)."; };
+   return;
+  }
+  busy("Loading the owner page…");
+  const {data:o,error}=await os.rpc("owner_overview");
+  if(error){
+   view.innerHTML=`<div class="done"><h2>${/not the owner/.test(error.message)?"This account isn't the owner":"The owner page didn't load"}</h2><p>${esc(error.message)}</p></div>
+    <button class="big plain" id="osignout">Sign out</button>`;
+   $("#osignout").onclick=async()=>{ await os.auth.signOut(); go("owner",null,false); }; return;
+  }
+  const st=o.stats;
+  const card=(v,kind)=>`<li class="oc${v.hidden?" ohid":""}">
+    <div class="ophotos">${v.photo_paths.map(p=>`<a href="${photoUrl(p)}" target="_blank" rel="noopener"><img src="${photoUrl(p)}" alt="" loading="lazy"></a>`).join("")}</div>
+    <div class="name">${esc(v.stop_name)}${v.hidden?' <span class="otag">Hidden</span>':""}</div>
+    <div class="meta">Photo ${when(v.taken_at)}, sent ${when(v.created_at)}${v.condition?" · "+esc(CONDITION_LABEL[v.condition]):""}</div>
+    <div class="meta">Titles: ${v.read_status==="done"?v.books+" books":v.read_status==="waiting"?"waiting to be read":v.read_status==="failed"?"reading failed":"off"}</div>
+    ${v.open_reports?`<div class="meta"><b>${v.open_reports} report${v.open_reports>1?"s":""}:</b> ${(v.reasons||[]).map(r=>esc(r.reason||"no reason")).join("; ")}</div>`:""}
+    <div class="row">
+     ${v.hidden?`<button class="big green" data-a="show" data-v="${v.id}">Restore</button>`:`<button class="big red" data-a="hide" data-v="${v.id}">Hide</button>`}
+     ${v.open_reports&&!v.hidden?`<button class="big plain" data-a="dismiss" data-v="${v.id}">Dismiss reports</button>`:""}
+     ${!v.hidden&&kind==="recent"?`<button class="big plain" data-a="reread" data-v="${v.id}">Re-read titles</button>`:""}
+     <button class="big plain" data-a="open" data-s="${esc(v.stop_id)}">Open stop</button>
+    </div></li>`;
+  view.innerHTML=`<h1>Owner page</h1>
+   <p class="lede">${st.visits} visits (${st.visits_today} today) · ${st.books} books read · ${st.reads_today} reads today (limit 40) · ${st.stops_added} stops added by people</p>
+   <div class="actions">
+    ${st.waiting?`<button class="big green" id="osweep">Read the ${st.waiting} waiting photo${st.waiting>1?"s":""} now</button>`:""}
+    <button class="big plain" id="orefresh">Refresh</button>
+   </div>
+   <p id="omsg" class="small" role="status"></p>
+   <h2>Reported (${o.reported.length})</h2>
+   ${o.reported.length?`<ul class="list olist">${o.reported.map(v=>card(v,"reported")).join("")}</ul>`:'<p class="small">Nothing reported.</p>'}
+   <h2>Hidden (${o.hidden.length})</h2>
+   ${o.hidden.length?`<ul class="list olist">${o.hidden.map(v=>card(v,"hidden")).join("")}</ul>`:'<p class="small">Nothing hidden.</p>'}
+   <h2>Latest visits</h2>
+   <ul class="list olist">${o.recent.map(v=>card(v,"recent")).join("")}</ul>
+   <button class="big plain" id="osignout">Sign out</button>`;
+  const msg=t=>{$("#omsg").textContent=t;};
+  const reload=()=>go("owner",null,false);
+  $("#orefresh").onclick=reload;
+  $("#osignout").onclick=async()=>{ await os.auth.signOut(); reload(); };
+  const sw=$("#osweep"); if(sw) sw.onclick=async()=>{ sw.disabled=true; msg("Reading… this takes about 20 seconds a visit.");
+   await os.functions.invoke("read-spines",{body:{sweep:true}}).catch(()=>{}); setTimeout(reload,25000); };
+  view.querySelectorAll("[data-a]").forEach(b=>b.onclick=async()=>{
+   const a=b.dataset.a, id=b.dataset.v;
+   if(a==="open"){ const {data:s}=await sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",b.dataset.s).maybeSingle(); if(s) go("stop",s); return; }
+   b.disabled=true;
+   const r=a==="hide"?await os.rpc("owner_set_hidden",{p_visit:id,p_hidden:true})
+     :a==="show"?await os.rpc("owner_set_hidden",{p_visit:id,p_hidden:false})
+     :a==="dismiss"?await os.rpc("owner_dismiss_reports",{p_visit:id})
+     :await os.rpc("owner_reread",{p_visit:id});
+   if(r.error){ b.disabled=false; msg("That didn't work: "+r.error.message); return; }
+   if(a==="reread"){ msg("Reading the titles again… about 20 seconds."); await os.functions.invoke("read-spines",{body:{visit_id:id}}).catch(()=>{}); setTimeout(reload,25000); return; }
+   reload(); });
+ },
  async search(q){
   busy("Searching…");
   const {data,error}=await sb.rpc("search_all",{p_q:q,p_lat:here?.lat??null,p_lon:here?.lon??null});
@@ -793,6 +871,7 @@ async function shrink(file){
 (async()=>{
   const id=new URLSearchParams(location.search).get("stop");
   go("home");
+  if(new URLSearchParams(location.search).has("owner")){ go("owner"); flushQueue(); return; }
   getAllStops(); // keep a copy of the stop list on the phone for places with no signal
   if(!id) { flushQueue(); return; }
   const {data:s}=await sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",id).maybeSingle();
