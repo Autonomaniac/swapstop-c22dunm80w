@@ -284,6 +284,8 @@ const sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:false}
 let ownerSb=null;
 const ownerClient=()=>ownerSb||(ownerSb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,detectSessionInUrl:true,storageKey:"swapstop-owner"}}));
 const PHOTO_BASE=SB_URL+"/storage/v1/object/public/shelf-photos/";
+// Supabase requests are "thenables" without .catch: wrap them so a network failure comes back as {error} instead of throwing.
+const safe=req=>Promise.resolve(req).catch(e=>({data:null,error:e}));
 const KIND_LABEL={phone_box:"Phone box",bus_shelter:"Bus shelter",other:"Book swap"};
 
 // An anonymous id for this phone, so the database can limit how fast one phone adds things. No personal data.
@@ -528,7 +530,7 @@ const SCREENS={
   const {data:visits,error}=await sb.from("visits").select("id,photo_paths,note,read_status,created_at,taken_at,condition").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).order("created_at",{ascending:false}).limit(1);
   if(error) return oops("This stop didn't load. Check you have signal.",()=>go("stop",s,false));
   const v=visits[0];
-  const {data:finds}=await sb.rpc("stop_finds",{p_stop:s.id}).catch(()=>({data:null}));
+  const {data:finds}=await safe(sb.rpc("stop_finds",{p_stop:s.id}));
   const mine=myFinds().includes(s.id);
   const where=`${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}${s.metres!=null?" · "+dist(s.metres):""}`;
   view.innerHTML=`<h1>${esc(s.name)}</h1><p class="lede">${where}</p>
@@ -644,7 +646,7 @@ const SCREENS={
  async pick(){
   busy("Finding where you are…");
   try{ await locate(); }catch(e){ return oops(e.message,()=>go("pick",null,false)); }
-  let {data,error}=await sb.rpc("stops_near",{p_lat:here.lat,p_lon:here.lon,p_limit:6}).catch(e=>({error:e}));
+  let {data,error}=await safe(sb.rpc("stops_near",{p_lat:here.lat,p_lon:here.lon,p_limit:6}));
   let offline=false;
   if(error||!data){ data=await nearestFromCache(here,6); offline=true; }
   if(!data.length) return oops("The book stop list didn't load, and none is saved on this phone yet. Open Swap Stop once where you have signal.",()=>go("pick",null,false));
