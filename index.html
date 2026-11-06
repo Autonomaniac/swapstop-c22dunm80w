@@ -128,6 +128,7 @@ input[type=search]{font:1.1rem var(--font);padding:14px 16px;min-height:60px;bor
 .found .big:disabled{opacity:1;color:var(--text,inherit)}
 .foundline{font-weight:700;background:color-mix(in srgb,#f2b705 30%,transparent);border-radius:12px;padding:10px 14px;margin:0 0 12px}
 .topfinds{margin:0 0 12px;padding-left:1.4em}
+.credit{background:var(--tint);border-radius:12px;padding:12px 14px}
 /* Owner page cards */
 .olist .oc{border:2px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:6px}
 .olist .oc.ohid{opacity:.75;border-style:dashed}
@@ -762,6 +763,7 @@ const SCREENS={
  about(){
   view.innerHTML=`<h1>About Swap Stop</h1>
    <p class="lede">A map of the free book swaps in phone boxes and bus stops, so you can find them and go and see what's on the shelf.</p>
+   <p class="credit">Swap Stop was dreamed up by <b>Ben Perry</b>, who loves hunting out the little libraries hidden in phone boxes and bus stops. Built by his brother Mark.</p>
    <h2>Your photos</h2>
    <p>When you add a photo, you agree Swap Stop can show it to everyone who uses it. The photo is still yours. Please only add photos you took yourself, and leave out people and car number plates. Anyone can report a photo, and reported photos are checked.</p>
    <h2>Your privacy</h2>
