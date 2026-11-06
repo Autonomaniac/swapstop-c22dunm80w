@@ -459,11 +459,13 @@ const SCREENS={
    <form id="sf" role="search"><label class="field" for="q">Look for a place
     <input type="search" id="q" placeholder="For example: Cubert, or Newquay" autocomplete="off" enterkeyhint="search"></label></form>
    <p class="small">2,405 book stops across the UK. Anyone can add a photo, no account needed.</p>
+   <p class="small"><a href="#" id="aboutlink">About Swap Stop, photos and map data</a></p>
    <div class="waiting" id="waiting" hidden role="status"></div>
    <div class="tip" id="tip" hidden></div>`;
   showWaiting(); showTip();
   $("#near").onclick=()=>go("near");
   $("#add").onclick=()=>go("how");
+  $("#aboutlink").onclick=e=>{e.preventDefault(); go("about");};
   $("#sf").onsubmit=e=>{e.preventDefault(); const q=$("#q").value.trim(); if(q.length>=3) go("search",q); else $("#q").focus();};
  },
  async near(){
@@ -709,11 +711,12 @@ const SCREENS={
     </div>
    </div>
    <button class="big green" id="send" hidden>Save these photos</button>
+   <p class="small" id="terms" hidden>By saving, you agree Swap Stop can show your photos to everyone who uses it. They're still yours. Please only add photos you took yourself.</p>
    <p id="msg" class="small" role="status"></p>`;
   const draw=()=>{ $("#pv").innerHTML=files.map((f,i)=>`<div class="photo"><img src="${f.url}" alt="Shelf photo ${i+1}"></div>
      <button class="big plain" data-rm="${i}">Remove photo ${i+1}</button>`).join("");
    $("#pv").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{files.splice(+b.dataset.rm,1);draw();});
-   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#gallabel").textContent=files.length?"Choose more photos from my phone":"Choose photos from my phone"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; $("#condbox").hidden=!files.length; };
+   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#gallabel").textContent=files.length?"Choose more photos from my phone":"Choose photos from my phone"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; $("#terms").hidden=!files.length; $("#condbox").hidden=!files.length; };
   let condition=null;
   view.querySelectorAll("#cond button").forEach(b=>b.onclick=()=>{
    condition=condition===b.dataset.c?null:b.dataset.c;
@@ -755,6 +758,25 @@ const SCREENS={
    <button class="big plain" id="h">Back to the start</button>`;
   $("#see").onclick=()=>{history_=[["home"]]; go("stop",s);};
   $("#h").onclick=()=>{history_=[]; go("home");};
+ },
+ about(){
+  view.innerHTML=`<h1>About Swap Stop</h1>
+   <p class="lede">A map of the free book swaps in phone boxes and bus stops, so you can find them and go and see what's on the shelf.</p>
+   <h2>Your photos</h2>
+   <p>When you add a photo, you agree Swap Stop can show it to everyone who uses it. The photo is still yours. Please only add photos you took yourself, and leave out people and car number plates. Anyone can report a photo, and reported photos are checked.</p>
+   <h2>Your privacy</h2>
+   <p>There are no accounts. Your phone keeps a random code so we can stop one phone sending too much at once, and it remembers which stops you've found. Before a photo is sent, the hidden location and camera details inside it are removed. Your location is only used to look up the stops near you, and Swap Stop doesn't save it.</p>
+   <h2>Map data</h2>
+   <p>The map and most stop locations come from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>, © OpenStreetMap contributors, available under the <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">Open Database License</a>. Our list of stops, including ones added by Swap Stop users, is shared under the same licence.</p>
+   <button class="big plain" id="dlstops">Download the list of stops</button>
+   <p id="msg" class="small" role="status"></p>`;
+  $("#dlstops").onclick=async()=>{ $("#msg").textContent="Getting the list ready…";
+   const stops=await getAllStops(); if(!stops.length){ $("#msg").textContent="The list didn't load. Check you have signal."; return; }
+   const out={licence:"ODbL 1.0 (https://opendatacommons.org/licenses/odbl/)",attribution:"© OpenStreetMap contributors; Swap Stop users",
+     made:new Date().toISOString(),stops:stops.map(({id,name,kind,place,lat,lon})=>({id,name,kind,place,lat,lon}))};
+   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([JSON.stringify(out)],{type:"application/json"}));
+   a.download="swap-stop-stops.json"; document.body.appendChild(a); a.click(); a.remove();
+   $("#msg").textContent=`Downloaded ${stops.length} stops.`; };
  },
  // ---- Owner page (Mark only). Reached by ?owner=1, linked from nowhere. The database decides who is the owner:
  // every owner_* function checks the signed-in email against public.owners, so this page is only a viewer.
