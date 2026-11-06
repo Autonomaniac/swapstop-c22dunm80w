@@ -122,6 +122,12 @@ input[type=search]{font:1.1rem var(--font);padding:14px 16px;min-height:60px;bor
 .caption{font-size:.9rem;color:var(--muted)}
 
 .books{list-style:none;margin:0;padding:0;border-top:2px solid var(--line)}
+/* "I found it" */
+.big.gold{background:#f2b705;color:#1f3550}
+.found{display:grid;gap:6px;margin:16px 0}
+.found .big:disabled{opacity:1;color:var(--text,inherit)}
+.foundline{font-weight:700;background:color-mix(in srgb,#f2b705 30%,transparent);border-radius:12px;padding:10px 14px;margin:0 0 12px}
+.topfinds{margin:0 0 12px;padding-left:1.4em}
 /* Owner page cards */
 .olist .oc{border:2px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:6px}
 .olist .oc.ohid{opacity:.75;border-style:dashed}
@@ -291,6 +297,9 @@ function deviceId(){
   return id;
 }
 const DEVICE=deviceId();
+// "I found it": the stops this phone has found, kept on the phone (the database keeps the counts).
+const myFinds=()=>{ try{ const a=JSON.parse(localStorage.getItem("swapstop-found")||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } };
+const addFind=id=>{ const a=myFinds(); if(!a.includes(id)){ a.push(id); try{ localStorage.setItem("swapstop-found",JSON.stringify(a)); }catch(e){} } };
 
 // The two S books swap places every 18 s and swap back (first swap ~4 s after opening);
 // the two P books do the same, 4.5 s later, so only one pair is ever moving at a time.
@@ -351,7 +360,7 @@ function stopCard(s,act){
     <div class="thumb">${thumb(s.latest_photo)}</div>
     <div><div class="name">${esc(s.name)}</div>
     <div class="meta">${s.metres!=null?`<span class="dist">${dist(s.metres)}</span> · `:""}${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}</div>
-    <div class="meta">${s.last_seen?`Shelf photo ${when(s.last_seen)}`:"No photo yet"}</div></div></button></li>`;
+    <div class="meta">${s.last_seen?`Photo ${when(s.last_seen)}`:"No photo yet"}</div></div></button></li>`;
 }
 function wireCards(list){ view.querySelectorAll(".stop").forEach(b=>b.onclick=()=>{
   const s=list.find(x=>x.id===b.dataset.id); b.dataset.act==="pick"?go("photo",s):go("stop",s);});}
@@ -399,8 +408,6 @@ async function sendVisit(v,progress){
   if(error) throw Object.assign(new Error(/too many/.test(error.message)?"toomany":"save"),{offline:!navigator.onLine});
   const chk=await sb.from("visits").select("id").eq("id",vid).maybeSingle();
   if(chk.error||!chk.data) throw new Error("confirm");
-  // Ask for the book titles to be read. Not awaited: the reader works on its own, and the visit is already saved.
-  sb.functions.invoke("read-spines",{body:{visit_id:vid}}).catch(()=>{});
   return vid;
 }
 let flushing=false;
@@ -441,13 +448,14 @@ if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch
 const SCREENS={
  home(){
   view.innerHTML=`<h1>Free books in phone boxes and bus stops</h1>
-   <p class="lede">Take a book, leave a book. See what's on the shelf before you go.</p>
+   <p class="lede">Find the little libraries hidden in phone boxes and bus stops. Take a book, leave a book, and see what you discover.</p>
+   ${myFinds().length?`<p class="foundline">You've found ${myFinds().length} book stop${myFinds().length>1?"s":""}</p>`:""}
    <div class="actions">
-    <button class="big red" id="near">${ICON_SEARCH}<span>Find books near me</span></button>
-    <button class="big green" id="add">${ICON_CAMERA}<span>Add a photo of a shelf</span></button>
+    <button class="big red" id="near">${ICON_SEARCH}<span>Find book stops near me</span></button>
+    <button class="big green" id="add">${ICON_CAMERA}<span>Add a photo of a stop</span></button>
    </div>
-   <form id="sf" role="search"><label class="field" for="q">Look for a book or a place
-    <input type="search" id="q" placeholder="For example: Rebecca, or Cubert" autocomplete="off" enterkeyhint="search"></label></form>
+   <form id="sf" role="search"><label class="field" for="q">Look for a place
+    <input type="search" id="q" placeholder="For example: Cubert, or Newquay" autocomplete="off" enterkeyhint="search"></label></form>
    <p class="small">2,405 book stops across the UK. Anyone can add a photo, no account needed.</p>
    <div class="waiting" id="waiting" hidden role="status"></div>
    <div class="tip" id="tip" hidden></div>`;
@@ -460,7 +468,7 @@ const SCREENS={
   view.innerHTML=`<h1>Book stops</h1>
    <p class="lede" id="mapnote">Finding where you are…</p>
    <div id="map" role="region" aria-label="Map of book stops"></div>
-   <div class="legend"><span><i style="background:#3f9b4a"></i>Shelf photo this week</span><span><i style="background:#e0a400"></i>Photo this month</span><span><i style="background:#d6303b"></i>No recent photo</span><span><i style="background:#2f73d9"></i>You</span></div>
+   <div class="legend"><span><i style="background:#3f9b4a"></i>Photo this week</span><span><i style="background:#e0a400"></i>Photo this month</span><span><i style="background:#d6303b"></i>No recent photo</span><span><i style="background:#fff;box-shadow:0 0 0 3px #f2b705"></i>You found it</span><span><i style="background:#2f73d9"></i>You</span></div>
    <p class="small">Tap a dot to see the stop. Pinch or use + and − to zoom. Planning a trip? Move the map there and tap the button below.</p>
    <button class="big plain" id="here-list">List the stops in this part of the map</button>
    <h2 id="listhead" hidden></h2>
@@ -486,10 +494,12 @@ const SCREENS={
    const [stops,fresh]=await Promise.all([getAllStops(),getFreshness().catch(()=>new Map())]);
    // tolerance: the tappable area reaches 16 px beyond each dot, so a fingertip doesn't have to land exactly on it.
    const r=L.canvas({padding:.5,tolerance:16});
+   const found=new Set(myFinds());
    for(const s of stops){
-    const f=fresh.get(s.id), col=ageColour(f?.seen);
-    s._m=L.circleMarker([s.lat,s.lon],{renderer:r,radius:f?8:6,weight:2,color:"#ffffff",fillColor:col,fillOpacity:1})
-     .bindPopup(`<b>${esc(s.name)}</b><br>${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}<br>${f?`Shelf photo ${when(f.seen)}`:"No photo yet"}${f?.condition?`<br>${CONDITION_LABEL[f.condition]}`:""}<button class="pop-open" data-stop="${esc(s.id)}">Open this stop</button>`)
+    const f=fresh.get(s.id), col=ageColour(f?.seen), got=found.has(s.id);
+    // Stops this phone has found get a thick gold ring.
+    s._m=L.circleMarker([s.lat,s.lon],{renderer:r,radius:got?9:f?8:6,weight:got?4:2,color:got?"#f2b705":"#ffffff",fillColor:col,fillOpacity:1})
+     .bindPopup(`<b>${esc(s.name)}</b><br>${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}<br>${f?`Photo ${when(f.seen)}`:"No photo yet"}${f?.condition?`<br>${CONDITION_LABEL[f.condition]}`:""}<button class="pop-open" data-stop="${esc(s.id)}">Open this stop</button>`)
      .addTo(map);
    }
   })();
@@ -517,17 +527,19 @@ const SCREENS={
   busy("Opening "+s.name+"…");
   const {data:visits,error}=await sb.from("visits").select("id,photo_paths,note,read_status,created_at,taken_at,condition").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).order("created_at",{ascending:false}).limit(1);
   if(error) return oops("This stop didn't load. Check you have signal.",()=>go("stop",s,false));
-  const v=visits[0]; let books=[];
-  if(v){ const r=await sb.from("books").select("title,author,confident").eq("visit_id",v.id); books=r.data||[]; }
+  const v=visits[0];
+  const {data:finds}=await sb.rpc("stop_finds",{p_stop:s.id}).catch(()=>({data:null}));
+  const mine=myFinds().includes(s.id);
   const where=`${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}${s.metres!=null?" · "+dist(s.metres):""}`;
   view.innerHTML=`<h1>${esc(s.name)}</h1><p class="lede">${where}</p>
    ${v?`${v.photo_paths.map((p,i)=>`<div class="photo" role="button" tabindex="0" data-ph aria-label="Shelf photo ${i+1}. Tap to make it bigger"><img src="${photoUrl(p)}" alt="Shelf photo ${i+1}"></div>`).join("")}
-     <p class="caption">Photo taken ${when(v.taken_at||v.created_at)}. Tap a photo to make it bigger. Books change often, so some may have gone.</p>
-     ${v.condition?`<p class="condline">${CONDITION_LABEL[v.condition]} (${when(v.taken_at||v.created_at)})</p>`:""}
-     <h2>Books on the shelf</h2>
-     ${books.length?`<ul class="books">${books.map(b=>`<li><span class="t">${esc(b.title)}</span>${b.author?`<span class="a">${esc(b.author)}</span>`:""}${b.confident?"":'<span class="unsure">Spine hard to read, best guess</span>'}</li>`).join("")}</ul>`
-       :`<p class="small">${v.read_status==="waiting"?"The book titles are being read from this photo. Check back in a minute, or zoom into the photo to see them.":"No titles could be read from this photo. A close-up of the books works best. Zoom into the photo to see them."}</p>`}`
-   :`<div class="done"><h2>No photo yet</h2><p>Be the first to show what's on this shelf.</p></div>`}
+     <p class="caption">Photo taken ${when(v.taken_at||v.created_at)}. Tap a photo to make it bigger.</p>
+     ${v.condition?`<p class="condline">${CONDITION_LABEL[v.condition]} (${when(v.taken_at||v.created_at)})</p>`:""}`
+   :`<div class="done"><h2>No photo yet</h2><p>Be the first to show people what this stop looks like.</p></div>`}
+   <div class="found">
+    <button class="big ${mine?"plain":"gold"}" id="foundit"${mine?" disabled":""}>${mine?"You found this one ✓":"I found it!"}</button>
+    <p class="small" id="foundcount">${finds==null?"":finds?`Found by ${finds} ${finds===1?"person":"people"}`:"Nobody has found this one yet. Be the first!"}</p>
+   </div>
    <div class="actions">
     <a class="big plain" href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}" target="_blank" rel="noopener">Get directions</a>
     <button class="big green" id="addhere">Add a new photo here</button>
@@ -535,6 +547,11 @@ const SCREENS={
     ${v?'<button class="big plain" id="report">Report this photo</button><p id="reported" class="small" hidden>Thank you. If one more person reports it, it is hidden until it is checked.</p>':""}
    </div>`;
   $("#printsign").onclick=()=>go("sign",s);
+  const fb=$("#foundit"); if(fb&&!mine) fb.onclick=async()=>{ fb.disabled=true;
+    const {data,error}=await sb.rpc("found_it",{p_stop:s.id,p_device:DEVICE});
+    if(error){ fb.disabled=false; $("#foundcount").textContent=/too many/.test(error.message)?"That's a lot of finds for one day! Try again tomorrow.":"That didn't save. Check you have signal and tap again."; return; }
+    addFind(s.id); fb.className="big plain"; fb.textContent="You found this one ✓";
+    $("#foundcount").textContent=`Well done! Found by ${data.count} ${data.count===1?"person":"people"}. You've found ${myFinds().length} book stop${myFinds().length>1?"s":""}.`; };
   view.querySelectorAll("[data-ph]").forEach(ph=>{const t=()=>ph.classList.toggle("zoomed"); ph.onclick=t; ph.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();t();}};});
   $("#addhere").onclick=()=>go("photo",s);
   const r=$("#report"); if(r) r.onclick=async()=>{ r.disabled=true;
@@ -573,8 +590,8 @@ const SCREENS={
   $("#later").onclick=()=>go("gallery");
  },
  gallery(){
-  view.innerHTML=`<h1>Choose your shelf photos</h1>
-   <p class="lede">Pick up to 3 photos of the same stop, one per shelf.</p>
+  view.innerHTML=`<h1>Choose your photos</h1>
+   <p class="lede">Pick up to 3 photos of the same stop, showing what it looks like.</p>
    <label class="big green" for="gal" style="cursor:pointer">Choose photos</label>
    <input type="file" id="gal" accept="image/*" multiple hidden>
    <p id="msg" class="small" role="status"></p>`;
@@ -671,12 +688,12 @@ const SCREENS={
  },
  photo(s){
   let files=s.preset?[...s.preset]:[];
-  view.innerHTML=`<h1>${files.length?"Check your photos":"Take a close-up of the books"}</h1>
+  view.innerHTML=`<h1>${files.length?"Check your photos":"Take a photo of the stop"}</h1>
    <p class="lede">${esc(s.name)}</p>
-   <p><b>Stand close, so the books fill the photo</b> and you could read the titles yourself. That's how the titles get read, so people can search for them. A photo of the whole phone box or shelter is too far away.</p>
-   <p class="small">One photo per shelf, up to 3. Please photograph only the books, no people or car number plates.</p>
+   <p><b>Show what the stop looks like</b>, so someone who has never been here knows what to look for. Stand back far enough to get the whole phone box or shelter, and anything nearby that helps, like a shop or a post box.</p>
+   <p class="small">Up to 3 photos. Please leave out people and car number plates.</p>
    <div id="pv" class="list"></div>
-   <label class="big red" for="cam" style="cursor:pointer" id="camlabel">Take a close-up</label>
+   <label class="big red" for="cam" style="cursor:pointer" id="camlabel">Take a photo</label>
    <input type="file" id="cam" accept="image/*" capture="environment" hidden>
    <label class="big plain" for="pickgal" style="cursor:pointer" id="gallabel">Choose photos from my phone</label>
    <input type="file" id="pickgal" accept="image/*" multiple hidden>
@@ -694,7 +711,7 @@ const SCREENS={
   const draw=()=>{ $("#pv").innerHTML=files.map((f,i)=>`<div class="photo"><img src="${f.url}" alt="Shelf photo ${i+1}"></div>
      <button class="big plain" data-rm="${i}">Remove photo ${i+1}</button>`).join("");
    $("#pv").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{files.splice(+b.dataset.rm,1);draw();});
-   $("#camlabel").textContent=files.length?"Take another close-up":"Take a close-up"; $("#gallabel").textContent=files.length?"Choose more photos from my phone":"Choose photos from my phone"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; $("#condbox").hidden=!files.length; };
+   $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#gallabel").textContent=files.length?"Choose more photos from my phone":"Choose photos from my phone"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; $("#condbox").hidden=!files.length; };
   let condition=null;
   view.querySelectorAll("#cond button").forEach(b=>b.onclick=()=>{
    condition=condition===b.dataset.c?null:b.dataset.c;
@@ -731,7 +748,7 @@ const SCREENS={
    <p>They'll send by themselves the next time Swap Stop is open and you have signal. You don't need to do anything else.</p></div>`
    :`<div class="done"><h1>Thank you</h1>
    <p>Your photos of ${esc(s.name)} are saved. Anyone looking at this stop can see them now.</p>
-   <p class="small">The book titles are read from the photos in about a minute, so people can search for them.</p></div>`)+`
+   <p class="small">Now people heading here will know what to look for.</p></div>`)+`
    <button class="big green" id="see">See ${esc(s.name)}</button>
    <button class="big plain" id="h">Back to the start</button>`;
   $("#see").onclick=()=>{history_=[["home"]]; go("stop",s);};
@@ -766,20 +783,16 @@ const SCREENS={
     <div class="ophotos">${v.photo_paths.map(p=>`<a href="${photoUrl(p)}" target="_blank" rel="noopener"><img src="${photoUrl(p)}" alt="" loading="lazy"></a>`).join("")}</div>
     <div class="name">${esc(v.stop_name)}${v.hidden?' <span class="otag">Hidden</span>':""}</div>
     <div class="meta">Photo ${when(v.taken_at)}, sent ${when(v.created_at)}${v.condition?" · "+esc(CONDITION_LABEL[v.condition]):""}</div>
-    <div class="meta">Titles: ${v.read_status==="done"?v.books+" books":v.read_status==="waiting"?"waiting to be read":v.read_status==="failed"?"reading failed":"off"}</div>
     ${v.open_reports?`<div class="meta"><b>${v.open_reports} report${v.open_reports>1?"s":""}:</b> ${(v.reasons||[]).map(r=>esc(r.reason||"no reason")).join("; ")}</div>`:""}
     <div class="row">
      ${v.hidden?`<button class="big green" data-a="show" data-v="${v.id}">Restore</button>`:`<button class="big red" data-a="hide" data-v="${v.id}">Hide</button>`}
      ${v.open_reports&&!v.hidden?`<button class="big plain" data-a="dismiss" data-v="${v.id}">Dismiss reports</button>`:""}
-     ${!v.hidden&&kind==="recent"?`<button class="big plain" data-a="reread" data-v="${v.id}">Re-read titles</button>`:""}
      <button class="big plain" data-a="open" data-s="${esc(v.stop_id)}">Open stop</button>
     </div></li>`;
   view.innerHTML=`<h1>Owner page</h1>
-   <p class="lede">${st.visits} visits (${st.visits_today} today) · ${st.books} books read · ${st.reads_today} reads today (limit 40) · ${st.stops_added} stops added by people</p>
-   <div class="actions">
-    ${st.waiting?`<button class="big green" id="osweep">Read the ${st.waiting} waiting photo${st.waiting>1?"s":""} now</button>`:""}
-    <button class="big plain" id="orefresh">Refresh</button>
-   </div>
+   <p class="lede">${st.visits} photo visits (${st.visits_today} today) · ${st.finds} finds by ${st.finders} ${st.finders===1?"person":"people"} (${st.finds_today} today) · ${st.stops_added} stops added by people</p>
+   <div class="actions"><button class="big plain" id="orefresh">Refresh</button></div>
+   ${o.top_finds.length?`<h2>Most found stops</h2><ol class="topfinds">${o.top_finds.map(t=>`<li>${esc(t.stop_name)}: ${t.finds}</li>`).join("")}</ol>`:""}
    <p id="omsg" class="small" role="status"></p>
    <h2>Reported (${o.reported.length})</h2>
    ${o.reported.length?`<ul class="list olist">${o.reported.map(v=>card(v,"reported")).join("")}</ul>`:'<p class="small">Nothing reported.</p>'}
@@ -792,24 +805,21 @@ const SCREENS={
   const reload=()=>go("owner",null,false);
   $("#orefresh").onclick=reload;
   $("#osignout").onclick=async()=>{ await os.auth.signOut(); reload(); };
-  const sw=$("#osweep"); if(sw) sw.onclick=async()=>{ sw.disabled=true; msg("Reading… this takes about 20 seconds a visit.");
-   await os.functions.invoke("read-spines",{body:{sweep:true}}).catch(()=>{}); setTimeout(reload,25000); };
   view.querySelectorAll("[data-a]").forEach(b=>b.onclick=async()=>{
    const a=b.dataset.a, id=b.dataset.v;
    if(a==="open"){ const {data:s}=await sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",b.dataset.s).maybeSingle(); if(s) go("stop",s); return; }
    b.disabled=true;
    const r=a==="hide"?await os.rpc("owner_set_hidden",{p_visit:id,p_hidden:true})
      :a==="show"?await os.rpc("owner_set_hidden",{p_visit:id,p_hidden:false})
-     :a==="dismiss"?await os.rpc("owner_dismiss_reports",{p_visit:id})
-     :await os.rpc("owner_reread",{p_visit:id});
+     :await os.rpc("owner_dismiss_reports",{p_visit:id});
    if(r.error){ b.disabled=false; msg("That didn't work: "+r.error.message); return; }
-   if(a==="reread"){ msg("Reading the titles again… about 20 seconds."); await os.functions.invoke("read-spines",{body:{visit_id:id}}).catch(()=>{}); setTimeout(reload,25000); return; }
    reload(); });
  },
  async search(q){
   busy("Searching…");
-  const {data,error}=await sb.rpc("search_all",{p_q:q,p_lat:here?.lat??null,p_lon:here?.lon??null});
+  const {data:raw,error}=await sb.rpc("search_all",{p_q:q,p_lat:here?.lat??null,p_lon:here?.lon??null});
   if(error) return oops("The search didn't work. Check you have signal.",()=>go("search",q,false));
+  const data=raw.filter(h=>h.hit==="place"); // places only: book lists are deliberately not part of Swap Stop
   const n=q.toLowerCase(); const hl=x=>esc(x).replace(new RegExp(n.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"ig"),m=>`<mark>${m}</mark>`);
   view.innerHTML=`<h1>Results for “${esc(q)}”</h1>
    ${data.length?`<ul class="list">${data.map((h,i)=>`<li><button class="stop" data-i="${i}">
@@ -817,7 +827,7 @@ const SCREENS={
      <div>${h.hit==="place"?`<div class="hit-kind">Place</div><div class="name">${hl(h.stop_name)}</div>${h.place?`<div class="meta">${hl(h.place)}</div>`:""}`
        :`<div class="hit-kind">Book</div><div class="name">${hl(h.title)}</div>${h.author?`<div class="meta">${hl(h.author)}</div>`:""}<div class="meta">At ${esc(h.stop_name)}, seen ${when(h.seen)}</div>`}
      ${h.metres!=null?`<div class="meta"><span class="dist">${dist(h.metres)}</span></div>`:""}</div></button></li>`).join("")}</ul>`
-   :`<div class="done"><h2>Nothing found yet</h2><p>No stop name or shelf photo matches that. Try a shorter word, like just the author's surname or the village name.</p></div>`}
+   :`<div class="done"><h2>No stops found</h2><p>No stop or place matches that. Try a shorter word, like just the village or town name.</p></div>`}
    <button class="big plain" id="again">Search again</button>`;
   view.querySelectorAll(".stop").forEach(b=>b.onclick=async()=>{ const h=data[+b.dataset.i];
    const {data:s}=await sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",h.stop_id).maybeSingle();
