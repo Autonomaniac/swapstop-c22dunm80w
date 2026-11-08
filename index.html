@@ -150,6 +150,8 @@ input[type=search]{font:1.1rem var(--font);padding:14px 16px;min-height:60px;bor
 button:disabled{opacity:.6;cursor:wait}
 /* Map of every stop */
 #map{height:58vh;min-height:320px;max-height:560px;border-radius:14px;border:2px solid var(--line);z-index:1}
+.maploading{position:absolute;inset:0;z-index:700;display:grid;place-items:center;pointer-events:none;
+  font-size:1.2rem;font-weight:700;color:var(--ink);background:rgb(246 243 239 / .85);text-align:center;padding:20px}
 .legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.95rem;color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:8px}
 .legend i{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid #ffffff;box-shadow:0 0 0 1px #1b1e22}
@@ -414,16 +416,23 @@ const webglOK=()=>{ if(webglSeen!==undefined) return webglSeen;
   try{ const c=document.createElement("canvas"), g=window.WebGLRenderingContext&&(c.getContext("webgl2")||c.getContext("webgl"));
     webglSeen=!!g; g?.getExtension("WEBGL_lose_context")?.loseContext(); }catch(e){ webglSeen=false; } return webglSeen; };
 async function addBaseMap(map){
+  // "Loading the map…" sits over the map until it has drawn, so a blank box never looks broken.
+  const note=document.createElement("div"); note.className="maploading"; note.setAttribute("role","status");
+  note.textContent="Loading the map…"; map.getContainer().appendChild(note);
+  const done=()=>{ clearTimeout(slow); note.remove(); };
+  const slow=setTimeout(()=>{ note.textContent="The map is taking a while. It needs signal the first time. The dots and the list still work."; },20000);
   try{
     if(!webglOK()) throw new Error("no webgl");
     await loadGL();
-    if(window.__map!==map) return; // they left the map screen while it loaded
-    L.maplibreGL({style:OFM_STYLE,attribution:OFM_ATTR}).addTo(map);
+    if(window.__map!==map) return done(); // they left the map screen while it loaded
+    const layer=L.maplibreGL({style:OFM_STYLE,attribution:OFM_ATTR}).addTo(map);
+    const gm=layer.getMaplibreMap?.();
+    if(!gm||gm.loaded()) done(); else gm.once("load",done);
   }catch(e){
     // Rare fallback (very old phone, or the library couldn't load): plain OpenStreetMap pictures.
-    if(window.__map!==map) return;
+    if(window.__map!==map) return done();
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,
-      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}).addTo(map);
+      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}).once("load",done).addTo(map);
   }
 }
 
