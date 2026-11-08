@@ -397,8 +397,8 @@ const nearestFromCache=async(pt,n)=>(await getAllStops()).map(s=>({...s,metres:d
 
 // ---- The background map. OpenFreeMap: free, no key, no usage limits, drawn on the phone (MapLibre).
 // Its library is big (~1 MB), so it is only fetched when someone opens the map, then kept by the offline helper.
-// Pinned versions + fingerprints, like the other libraries. Change "positron" to "liberty" for a busier, more colourful map.
-const OFM_STYLE="https://tiles.openfreemap.org/styles/positron";
+// Pinned versions + fingerprints, like the other libraries. "liberty" = colourful (Ben's choice, 8 Nov); "positron" = pale grey.
+const OFM_STYLE="https://tiles.openfreemap.org/styles/liberty";
 const OFM_ATTR='<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
 const GL_FILES=[
  ["link","https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css","sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK"],
