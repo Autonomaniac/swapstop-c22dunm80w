@@ -1,7 +1,7 @@
 {
   "name": "Swap Stop",
   "short_name": "Swap Stop",
-  "description": "Free books in phone boxes and bus stops. See what's on the shelf before you go.",
+  "description": "Find the free book swaps in phone boxes and bus stops.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

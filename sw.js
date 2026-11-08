@@ -2,7 +2,7 @@
 // The page itself: try the network first (so updates always arrive), fall back to the saved copy.
 // Libraries and icons: use the saved copy (they never change at a pinned version).
 // Database calls, photos and map pictures are never stored here.
-const CACHE = "swapstop-v1";
+const CACHE = "swapstop-v2"; // bump whenever manifest.json or an icon changes (they are served from this cache)
 const SHELL = ["./", "./manifest.json", "./icon-192.png", "./apple-touch-icon.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js",
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js",

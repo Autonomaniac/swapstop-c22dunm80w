@@ -2,7 +2,8 @@
 <title>Swap Stop</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#1f3550">
@@ -207,13 +208,13 @@ button:disabled{opacity:.6;cursor:wait}
 </header>
 
 <div class="wrap">
-  <p class="note" id="preview-note">Test version. Photos you add here are real and saved.</p>
   <main id="view" aria-live="polite"></main>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<!-- Libraries from public CDNs, each pinned to an exact version AND a fingerprint (integrity): if a CDN ever served altered code, the browser refuses to run it. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" integrity="sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1" crossorigin="anonymous"></script>
 <script>
 // Our own detective: green trilby, beige trench coat, big nose. He lifts his magnifying glass and a giant eye appears in it.
 const ICON_SEARCH=`<svg class="icon detective" viewBox="0 0 64 64" aria-hidden="true">
@@ -374,9 +375,14 @@ async function getAllStops(){
   let cached=null; try{cached=JSON.parse(localStorage.getItem("swapstop-stops")||"null");}catch(e){}
   if(cached&&Date.now()-cached.at<864e5){ window.__allStops=cached.stops; return cached.stops; }
   try{
-    const pages=await Promise.all([0,1,2,3].map(i=>sb.from("stops").select("id,name,kind,place,lat,lon").range(i*1000,i*1000+999)));
-    if(pages.some(p=>p.error)) throw new Error("load");
-    const stops=pages.flatMap(p=>p.data);
+    // The database hands out at most 1,000 rows at a time. Ask for 4 pages at once, and keep going while every page comes back full.
+    const stops=[];
+    for(let start=0;start<50000;start+=4000){
+     const pages=await Promise.all([0,1,2,3].map(i=>sb.from("stops").select("id,name,kind,place,lat,lon").order("id").range(start+i*1000,start+i*1000+999)));
+     if(pages.some(p=>p.error)) throw new Error("load");
+     pages.forEach(p=>stops.push(...p.data));
+     if(pages.some(p=>p.data.length<1000)) break;
+    }
     try{localStorage.setItem("swapstop-stops",JSON.stringify({at:Date.now(),stops}));}catch(e){}
     window.__allStops=stops; return stops;
   }catch(e){ if(cached){ window.__allStops=cached.stops; return cached.stops; } return []; }
@@ -459,7 +465,7 @@ const SCREENS={
    </div>
    <form id="sf" role="search"><label class="field" for="q">Look for a place
     <input type="search" id="q" placeholder="For example: Cubert, or Newquay" autocomplete="off" enterkeyhint="search"></label></form>
-   <p class="small">2,405 book stops across the UK. Anyone can add a photo, no account needed.</p>
+   <p class="small">Over 2,400 book stops across the UK. Anyone can add a photo, no account needed.</p>
    <p class="small"><a href="#" id="aboutlink">About Swap Stop, photos and map data</a></p>
    <div class="waiting" id="waiting" hidden role="status"></div>
    <div class="tip" id="tip" hidden></div>`;
@@ -530,14 +536,17 @@ const SCREENS={
  },
  async stop(s){
   busy("Opening "+s.name+"…");
-  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,note,read_status,created_at,taken_at,condition").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).order("created_at",{ascending:false}).limit(1);
+  // Some routes (search by name, "already on the map") arrive without the stop's location: fetch it so directions work.
+  if(s.lat==null){ const {data:full}=await safe(sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",s.id).maybeSingle());
+    const c=full||(window.__allStops||[]).find(x=>x.id===s.id); if(c) s={...c,...s,lat:c.lat,lon:c.lon,kind:c.kind,place:c.place}; }
+  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,created_at,taken_at,condition").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).order("created_at",{ascending:false}).limit(1);
   if(error) return oops("This stop didn't load. Check you have signal.",()=>go("stop",s,false));
   const v=visits[0];
   const {data:finds}=await safe(sb.rpc("stop_finds",{p_stop:s.id}));
   const mine=myFinds().includes(s.id);
   const where=`${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}${s.metres!=null?" · "+dist(s.metres):""}`;
   view.innerHTML=`<h1>${esc(s.name)}</h1><p class="lede">${where}</p>
-   ${v?`${v.photo_paths.map((p,i)=>`<div class="photo" role="button" tabindex="0" data-ph aria-label="Shelf photo ${i+1}. Tap to make it bigger"><img src="${photoUrl(p)}" alt="Shelf photo ${i+1}"></div>`).join("")}
+   ${v?`${v.photo_paths.map((p,i)=>`<div class="photo" role="button" tabindex="0" data-ph aria-label="Photo ${i+1} of this stop. Tap to make it bigger"><img src="${photoUrl(p)}" alt="Photo ${i+1} of this stop"></div>`).join("")}
      <p class="caption">Photo taken ${when(v.taken_at||v.created_at)}. Tap a photo to make it bigger.</p>
      ${v.condition?`<p class="condline">${CONDITION_LABEL[v.condition]} (${when(v.taken_at||v.created_at)})</p>`:""}`
    :`<div class="done"><h2>No photo yet</h2><p>Be the first to show people what this stop looks like.</p></div>`}
@@ -546,7 +555,7 @@ const SCREENS={
     <p class="small" id="foundcount">${finds==null?"":finds?`Found by ${finds} ${finds===1?"person":"people"}`:"Nobody has found this one yet. Be the first!"}</p>
    </div>
    <div class="actions">
-    <a class="big plain" href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}" target="_blank" rel="noopener">Get directions</a>
+    ${s.lat!=null?`<a class="big plain" href="https://www.google.com/maps/dir/?api=1&destination=${+s.lat},${+s.lon}" target="_blank" rel="noopener">Get directions</a>`:""}
     <button class="big green" id="addhere">Add a new photo here</button>
     <button class="big plain" id="printsign">Print a sign for this stop</button>
     ${v?'<button class="big plain" id="report">Report this photo</button><p id="reported" class="small" hidden>Thank you. If one more person reports it, it is hidden until it is checked.</p>':""}
@@ -573,7 +582,7 @@ const SCREENS={
     <div class="minishelf" aria-hidden="true"><i style="background:#d6303b;height:34px"></i><i style="background:#f2b705;height:28px"></i><i style="background:#1f9e8f;height:38px"></i><i style="background:#7b4fc4;height:30px"></i><i style="background:#f07c2a;height:36px"></i></div>
     <h1>Free books here</h1>
     <p class="stopname">${esc(s.name)}</p>
-    <p class="how">Take a book, leave a book. Scan the code to see what's on this shelf, or to add a photo of it when you swap a book.</p>
+    <p class="how">Take a book, leave a book. Scan the code to say you found this stop, or to add a photo of it.</p>
     <div class="qr">${qrSvg||"<p>QR code didn't load. Check you have signal and try again.</p>"}</div>
     <p class="how"><b>Swap Stop</b>: free books in phone boxes and bus stops</p>
     <p class="url">${esc(link)}</p>
@@ -585,7 +594,7 @@ const SCREENS={
   $("#doprint").onclick=()=>window.print();
  },
  how(){
-  view.innerHTML=`<h1>Add a photo of a shelf</h1>
+  view.innerHTML=`<h1>Add a photo of a stop</h1>
    <p class="lede">You can take one now, or use a photo you took earlier, for example where there was no signal.</p>
    <div class="actions">
     <button class="big red" id="now">I'm at the stop now</button>
@@ -714,7 +723,7 @@ const SCREENS={
    <button class="big green" id="send" hidden>Save these photos</button>
    <p class="small" id="terms" hidden>By saving, you agree Swap Stop can show your photos to everyone who uses it. They're still yours. Please only add photos you took yourself.</p>
    <p id="msg" class="small" role="status"></p>`;
-  const draw=()=>{ $("#pv").innerHTML=files.map((f,i)=>`<div class="photo"><img src="${f.url}" alt="Shelf photo ${i+1}"></div>
+  const draw=()=>{ $("#pv").innerHTML=files.map((f,i)=>`<div class="photo"><img src="${f.url}" alt="Your photo ${i+1}"></div>
      <button class="big plain" data-rm="${i}">Remove photo ${i+1}</button>`).join("");
    $("#pv").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{files.splice(+b.dataset.rm,1);draw();});
    $("#camlabel").textContent=files.length?"Take another photo":"Take a photo"; $("#gallabel").textContent=files.length?"Choose more photos from my phone":"Choose photos from my phone"; $("#camlabel").hidden=files.length>=3; $("#gallabel").hidden=files.length>=3; $("#send").hidden=!files.length; $("#terms").hidden=!files.length; $("#condbox").hidden=!files.length; };
@@ -771,7 +780,8 @@ const SCREENS={
    <h2>Map data</h2>
    <p>The map and most stop locations come from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>, © OpenStreetMap contributors, available under the <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">Open Database License</a>. Our list of stops, including ones added by Swap Stop users, is shared under the same licence.</p>
    <button class="big plain" id="dlstops">Download the list of stops</button>
-   <p id="msg" class="small" role="status"></p>`;
+   <p id="msg" class="small" role="status"></p>
+   <p class="small">© 2026 Swap Stop. The list of stops is open data, as above. The Swap Stop website itself (its design, detectives, words and code) is not: all rights reserved.</p>`;
   $("#dlstops").onclick=async()=>{ $("#msg").textContent="Getting the list ready…";
    const stops=await getAllStops(); if(!stops.length){ $("#msg").textContent="The list didn't load. Check you have signal."; return; }
    const out={licence:"ODbL 1.0 (https://opendatacommons.org/licenses/odbl/)",attribution:"© OpenStreetMap contributors; Swap Stop users",
@@ -850,8 +860,7 @@ const SCREENS={
   view.innerHTML=`<h1>Results for “${esc(q)}”</h1>
    ${data.length?`<ul class="list">${data.map((h,i)=>`<li><button class="stop" data-i="${i}">
      <div class="thumb"><div class="shelf" style="background:var(--tint)"></div></div>
-     <div>${h.hit==="place"?`<div class="hit-kind">Place</div><div class="name">${hl(h.stop_name)}</div>${h.place?`<div class="meta">${hl(h.place)}</div>`:""}`
-       :`<div class="hit-kind">Book</div><div class="name">${hl(h.title)}</div>${h.author?`<div class="meta">${hl(h.author)}</div>`:""}<div class="meta">At ${esc(h.stop_name)}, seen ${when(h.seen)}</div>`}
+     <div><div class="name">${hl(h.stop_name)}</div>${h.place?`<div class="meta">${hl(h.place)}</div>`:""}
      ${h.metres!=null?`<div class="meta"><span class="dist">${dist(h.metres)}</span></div>`:""}</div></button></li>`).join("")}</ul>`
    :`<div class="done"><h2>No stops found</h2><p>No stop or place matches that. Try a shorter word, like just the village or town name.</p></div>`}
    <button class="big plain" id="again">Search again</button>`;
@@ -894,7 +903,7 @@ async function readExif(file){
   return {};
 }
 
-// Phone photos can be 12+ megapixels. Shrink to the long edge the reader uses (2,576 px) as a JPEG.
+// Phone photos can be 12+ megapixels. Shrink the long edge to 2,576 px, as a JPEG.
 async function shrink(file){
   const bmp=await createImageBitmap(file,{imageOrientation:"from-image"});
   const k=Math.min(1,2576/Math.max(bmp.width,bmp.height));
@@ -913,6 +922,7 @@ async function shrink(file){
   const {data:s}=await sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",id).maybeSingle();
   const st=s||(await getAllStops()).find(x=>x.id===id);
   if(st) go("stop",st);
+  else view.insertAdjacentHTML("afterbegin",`<p class="waiting">That stop couldn't be opened just now. Check you have signal, or look for it by place name below.</p>`);
   flushQueue();
 })();
 </script>
