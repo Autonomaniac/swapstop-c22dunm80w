@@ -8,6 +8,9 @@ const SHELL = ["./", "./manifest.json", "./icon-192.png", "./apple-touch-icon.pn
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js",
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css",
   "https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"];
+const LAZY = ["https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js",
+  "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css",
+  "https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => Promise.allSettled(SHELL.map(u => c.add(u)))).then(() => self.skipWaiting()));
@@ -26,5 +29,13 @@ self.addEventListener("fetch", e => {
   }
   if (SHELL.some(u => url.href === new URL(u, self.location).href)) {
     e.respondWith(caches.match(req).then(hit => hit || fetch(req)));
+    return;
+  }
+  // The map-drawing library (~1 MB) is not fetched up front: it is saved here the first time someone opens the map.
+  if (LAZY.includes(url.href)) {
+    e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(r => {
+      if (r.ok) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
+      return r;
+    })));
   }
 });

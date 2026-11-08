@@ -369,11 +369,12 @@ function stopCard(s,act){
 function wireCards(list){ view.querySelectorAll(".stop").forEach(b=>b.onclick=()=>{
   const s=list.find(x=>x.id===b.dataset.id); b.dataset.act==="pick"?go("photo",s):go("stop",s);});}
 
-// ---- Every stop, kept on the phone for a day, so "which stop are you at?" still works with no signal.
+// ---- Every stop, kept on the phone for 6 hours, so "which stop are you at?" still works with no signal.
+const STOPS_TTL=6*3600e3;
 async function getAllStops(){
   if(window.__allStops) return window.__allStops;
   let cached=null; try{cached=JSON.parse(localStorage.getItem("swapstop-stops")||"null");}catch(e){}
-  if(cached&&Date.now()-cached.at<864e5){ window.__allStops=cached.stops; return cached.stops; }
+  if(cached&&Date.now()-cached.at<STOPS_TTL){ window.__allStops=cached.stops; return cached.stops; }
   try{
     // The database hands out at most 1,000 rows at a time. Ask for 4 pages at once, and keep going while every page comes back full.
     const stops=[];
@@ -387,7 +388,44 @@ async function getAllStops(){
     window.__allStops=stops; return stops;
   }catch(e){ if(cached){ window.__allStops=cached.stops; return cached.stops; } return []; }
 }
+// A stop this phone has just added goes straight into the saved list, so it shows on the map at once.
+function rememberStop(s){
+  const list=window.__allStops; if(list&&!list.some(x=>x.id===s.id)) list.push(s);
+  try{ const c=JSON.parse(localStorage.getItem("swapstop-stops")||"null"); if(c&&Array.isArray(c.stops)&&!c.stops.some(x=>x.id===s.id)){ c.stops.push(s); localStorage.setItem("swapstop-stops",JSON.stringify(c)); } }catch(e){}
+}
 const nearestFromCache=async(pt,n)=>(await getAllStops()).map(s=>({...s,metres:distance(pt,s)})).sort((a,b)=>a.metres-b.metres).slice(0,n);
+
+// ---- The background map. OpenFreeMap: free, no key, no usage limits, drawn on the phone (MapLibre).
+// Its library is big (~1 MB), so it is only fetched when someone opens the map, then kept by the offline helper.
+// Pinned versions + fingerprints, like the other libraries. Change "positron" to "liberty" for a busier, more colourful map.
+const OFM_STYLE="https://tiles.openfreemap.org/styles/positron";
+const OFM_ATTR='<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+const GL_FILES=[
+ ["link","https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css","sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK"],
+ ["script","https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js","sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp"],
+ ["script","https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js","sha384-tXYNKOHx4T02jMP7YYCtBxPIv1B5gaA5mcVPBzqMp6d7VzWzxJgI2aWF/nJLrQdS"]];
+const loadFile=([tag,url,sri])=>new Promise((res,rej)=>{ const el=document.createElement(tag);
+  if(tag==="link"){ el.rel="stylesheet"; el.href=url; } else { el.src=url; el.async=false; }
+  el.integrity=sri; el.crossOrigin="anonymous"; el.onload=res; el.onerror=()=>rej(new Error("load "+url)); document.head.appendChild(el); });
+let glReady=null;
+const loadGL=()=>glReady||(glReady=Promise.all([loadFile(GL_FILES[0]),loadFile(GL_FILES[1])]).then(()=>loadFile(GL_FILES[2])).catch(e=>{ glReady=null; throw e; }));
+let webglSeen; // checked once: each check would otherwise hold a graphics context
+const webglOK=()=>{ if(webglSeen!==undefined) return webglSeen;
+  try{ const c=document.createElement("canvas"), g=window.WebGLRenderingContext&&(c.getContext("webgl2")||c.getContext("webgl"));
+    webglSeen=!!g; g?.getExtension("WEBGL_lose_context")?.loseContext(); }catch(e){ webglSeen=false; } return webglSeen; };
+async function addBaseMap(map){
+  try{
+    if(!webglOK()) throw new Error("no webgl");
+    await loadGL();
+    if(window.__map!==map) return; // they left the map screen while it loaded
+    L.maplibreGL({style:OFM_STYLE,attribution:OFM_ATTR}).addTo(map);
+  }catch(e){
+    // Rare fallback (very old phone, or the library couldn't load): plain OpenStreetMap pictures.
+    if(window.__map!==map) return;
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,
+      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}).addTo(map);
+  }
+}
 
 // ---- How fresh each stop's latest photo is, for the map colours.
 async function getFreshness(){ const {data}=await sb.rpc("stop_freshness"); const m=new Map(); (data||[]).forEach(r=>m.set(r.stop_id,r)); return m; }
@@ -484,10 +522,11 @@ const SCREENS={
    <button class="big plain" id="here-list">List the stops in this part of the map</button>
    <h2 id="listhead" hidden></h2>
    <ul class="list" id="nearlist"></ul>`;
+  // Free up the previous visit's map first: each one holds a graphics context, and phones only allow a handful.
+  if(window.__map){ try{ window.__map.remove(); }catch(e){} }
   const map=L.map("map",{preferCanvas:true,zoomControl:true,tapTolerance:20}).fitBounds([[49.9,-6.4],[58.7,1.8]]);
   window.__map=map; // handle for testing
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,
-    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}).addTo(map);
+  addBaseMap(map);
   const showList=async(lat,lon,label)=>{
    $("#listhead").hidden=false; $("#listhead").textContent="Loading…"; $("#nearlist").innerHTML="";
    const {data,error}=await sb.rpc("stops_near",{p_lat:lat,p_lon:lon,p_limit:20});
@@ -697,7 +736,9 @@ const SCREENS={
      view.innerHTML=`<div class="done"><h2>This stop is already on the map</h2><p>It's called "${esc(s.name)}". We'll add your photo to it, so all the photos stay together.</p></div>
       <button class="big green" id="useit">Add my photo to ${esc(s.name)}</button>`;
      $("#useit").onclick=()=>go("photo",{...s,preset}); return; }
-   go("photo",{id:data.id,name,kind:b.dataset.k,place:null,preset});
+   const added={id:data.id,name,kind:b.dataset.k,place:null,lat:pt.lat,lon:pt.lon};
+   rememberStop(added); // a list fetched later comes from the database, which already has it
+   go("photo",{...added,preset});
   });
  },
  photo(s){
@@ -778,7 +819,7 @@ const SCREENS={
    <h2>Your privacy</h2>
    <p>There are no accounts. Your phone keeps a random code so we can stop one phone sending too much at once, and it remembers which stops you've found. Before a photo is sent, the hidden location and camera details inside it are removed. Your location is only used to look up the stops near you, and Swap Stop doesn't save it.</p>
    <h2>Map data</h2>
-   <p>The map and most stop locations come from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>, © OpenStreetMap contributors, available under the <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">Open Database License</a>. Our list of stops, including ones added by Swap Stop users, is shared under the same licence.</p>
+   <p>The map is drawn by <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>. The map and most stop locations come from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>, © OpenStreetMap contributors, available under the <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">Open Database License</a>. Our list of stops, including ones added by Swap Stop users, is shared under the same licence.</p>
    <button class="big plain" id="dlstops">Download the list of stops</button>
    <p id="msg" class="small" role="status"></p>
    <p class="small">© 2026 Swap Stop. The list of stops is open data, as above. The Swap Stop website itself (its design, detectives, words and code) is not: all rights reserved.</p>`;
