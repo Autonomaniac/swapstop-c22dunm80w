@@ -121,6 +121,7 @@ input[type=search]{font:1.1rem var(--font);padding:14px 16px;min-height:60px;bor
 .photo img{width:100%;height:100%;object-fit:cover;display:block}
 .photo.zoomed img{object-fit:contain}
 .caption{font-size:.9rem;color:var(--muted)}
+.linkish{background:none;border:0;padding:10px 0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
 
 .books{list-style:none;margin:0;padding:0;border-top:2px solid var(--line)}
 /* "I found it" */
@@ -351,7 +352,8 @@ const oops=(msg,again)=>{view.innerHTML=`<div class="done"><h2>That didn't work<
   <button class="big plain" id="retry">Try again</button><button class="big plain" id="tohome">Back to the start</button>`;
   $("#retry").onclick=again; $("#tohome").onclick=()=>{history_=[];go("home");};};
 
-function go(name,arg,push=true){ if(push) history_.push([name,arg]); back.hidden=history_.length<=1; window.scrollTo(0,0); SCREENS[name](arg); }
+let leave=null; // a screen can set this to tidy up (for example, stop watching the phone's location) when the person moves on
+function go(name,arg,push=true){ if(leave){ try{leave();}catch(e){} leave=null; } if(push) history_.push([name,arg]); back.hidden=history_.length<=1; window.scrollTo(0,0); SCREENS[name](arg); }
 back.onclick=()=>{ if(history_.length>1){history_.pop(); const [n,a]=history_[history_.length-1]; go(n,a,false);} };
 $("#home-link").onclick=()=>{history_=[]; go("home");};
 
@@ -449,8 +451,44 @@ const qAll=async()=>{ const db=await idb(); return new Promise((res,rej)=>{ cons
 const qPut=async item=>{ const db=await idb(); return new Promise((res,rej)=>{ const t=db.transaction("queue","readwrite"); t.objectStore("queue").put(item); t.oncomplete=res; t.onerror=()=>rej(t.error); }); };
 const qDel=async id=>{ const db=await idb(); return new Promise((res,rej)=>{ const t=db.transaction("queue","readwrite"); t.objectStore("queue").delete(id); t.oncomplete=res; t.onerror=()=>rej(t.error); }); };
 
+// Naming a new stop without asking anyone to type: the parish it sits in, from postcodes.io (free, open UK data).
+// Only the stop's position is sent. No answer (no signal, or outside the UK data) just means a plainer name.
+async function placeFor(pt){
+  try{ const ctl=new AbortController(), t=setTimeout(()=>ctl.abort(),6000);
+    const r=await fetch(`https://api.postcodes.io/postcodes?lon=${(+pt.lon).toFixed(5)}&lat=${(+pt.lat).toFixed(5)}&limit=1&widesearch=true`,{signal:ctl.signal});
+    clearTimeout(t); const p=(await r.json())?.result?.[0]; if(!p) return null;
+    const ok=x=>x&&!/unparished/i.test(x)?x:null;
+    return ok(p.parish)||ok(p.admin_ward)||p.admin_district||null;
+  }catch(e){ return null; } }
+// Any UK town, village or postcode -> where it is (postcodes.io again: OS Open Names and ONS postcodes). Best match first.
+async function findPlaces(q){
+  const get=async u=>{ try{ const c=new AbortController(), t=setTimeout(()=>c.abort(),6000);
+    const r=await fetch("https://api.postcodes.io/"+u,{signal:c.signal}); clearTimeout(t); return (await r.json()).result||null; }catch(e){ return null; } };
+  const pc=q.replace(/\s+/g,"").toUpperCase();
+  if(/^[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2}$/.test(pc)){ const p=await get("postcodes/"+pc); return p&&p.latitude?[{name:p.postcode,label:p.postcode,lat:p.latitude,lon:p.longitude}]:[]; }
+  if(/^[A-Z]{1,2}\d[A-Z\d]?$/.test(pc)){ const p=await get("outcodes/"+pc); if(p&&p.latitude) return [{name:p.outcode,label:"the "+p.outcode+" area",lat:p.latitude,lon:p.longitude}]; }
+  const list=await get("places?limit=30&q="+encodeURIComponent(q.trim())); if(!Array.isArray(list)) return [];
+  const rank={City:0,Town:1,"Suburban Area":2,Village:3,Hamlet:4}, n=q.trim().toLowerCase(), exact=p=>(p.name_1||"").toLowerCase()===n?0:1;
+  return list.filter(p=>p.latitude&&p.name_1).sort((a,b)=>(exact(a)-exact(b))||((rank[a.local_type]??5)-(rank[b.local_type]??5)))
+    .slice(0,5).map(p=>({name:p.name_1,label:`${p.name_1}, ${p.county_unitary||p.district_borough||p.region||p.country||"UK"}`,lat:p.latitude,lon:p.longitude}));
+}
+const KIND_WORD={phone_box:"phone box",bus_shelter:"bus shelter",other:"book swap"};
+const autoName=(place,kind)=>place?`${place} ${KIND_WORD[kind]||"book swap"}`:`New ${KIND_WORD[kind]||"book swap"}`;
+
 // Send one visit: upload each photo, then record the visit, then check it really saved.
 async function sendVisit(v,progress){
+  // A visit to a stop that isn't on the map yet: add the stop first. If one is already within 25 metres,
+  // the database hands that one back instead, so trying again later can never make a duplicate.
+  if(v.newStop&&!v.stop.id){
+    progress?.("Adding the stop to the map…");
+    const n=v.newStop; let name=n.name, place=n.place||null;
+    if(!name){ place=place||await placeFor(n); name=autoName(place,n.kind); }
+    const {data,error}=await safe(sb.rpc("add_stop",{p_name:name,p_kind:n.kind,p_place:place,p_lat:n.lat,p_lon:n.lon,p_device:DEVICE}));
+    if(error||!data) throw Object.assign(new Error(/too many/.test(error?.message||"")?"toomanystops":"save"),{offline:!navigator.onLine});
+    v.existing=!data.ok;
+    v.stop=data.ok?{id:data.id,name,kind:n.kind,place,lat:n.lat,lon:n.lon}:{id:data.existing_id,name:data.existing_name,kind:n.kind};
+    if(data.ok) rememberStop(v.stop);
+  }
   const paths=[];
   for(let i=0;i<v.blobs.length;i++){
     progress?.(`Sending photo ${i+1} of ${v.blobs.length}…`);
@@ -509,9 +547,10 @@ const SCREENS={
    <div class="actions">
     <button class="big red" id="near">${ICON_SEARCH}<span>Find book stops near me</span></button>
     <button class="big green" id="add">${ICON_CAMERA}<span>Add a photo of a stop</span></button>
+    <button class="big gold" id="addnew">Add a book stop that's not on the map</button>
    </div>
-   <form id="sf" role="search"><label class="field" for="q">Look for a place
-    <input type="search" id="q" placeholder="For example: Cubert, or Newquay" autocomplete="off" enterkeyhint="search"></label></form>
+   <form id="sf" role="search"><label class="field" for="q">Or look somewhere else
+    <input type="search" id="q" placeholder="A town, village or postcode" autocomplete="off" enterkeyhint="search"></label></form>
    <p class="small">Over 2,400 book stops across the UK. Anyone can add a photo, no account needed.</p>
    <p class="small"><a href="#" id="aboutlink">About Swap Stop, photos and map data</a></p>
    <div class="waiting" id="waiting" hidden role="status"></div>
@@ -519,6 +558,7 @@ const SCREENS={
   showWaiting(); showTip();
   $("#near").onclick=()=>go("near");
   $("#add").onclick=()=>go("how");
+  $("#addnew").onclick=()=>go("newstop");
   $("#aboutlink").onclick=e=>{e.preventDefault(); go("about");};
   $("#sf").onsubmit=e=>{e.preventDefault(); const q=$("#q").value.trim(); if(q.length>=3) go("search",q); else $("#q").focus();};
  },
@@ -530,7 +570,9 @@ const SCREENS={
    <p class="small">Tap a dot to see the stop. Pinch or use + and − to zoom. Planning a trip? Move the map there and tap the button below.</p>
    <button class="big plain" id="here-list">List the stops in this part of the map</button>
    <h2 id="listhead" hidden></h2>
-   <ul class="list" id="nearlist"></ul>`;
+   <ul class="list" id="nearlist"></ul>
+   <button class="big gold" id="missing">Can't see your book stop? Add it to the map</button>`;
+  $("#missing").onclick=()=>go("newstop");
   // Free up the previous visit's map first: each one holds a graphics context, and phones only allow a handful.
   if(window.__map){ try{ window.__map.remove(); }catch(e){} }
   const map=L.map("map",{preferCanvas:true,zoomControl:true,tapTolerance:20}).fitBounds([[49.9,-6.4],[58.7,1.8]]);
@@ -587,15 +629,18 @@ const SCREENS={
   // Some routes (search by name, "already on the map") arrive without the stop's location: fetch it so directions work.
   if(s.lat==null){ const {data:full}=await safe(sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",s.id).maybeSingle());
     const c=full||(window.__allStops||[]).find(x=>x.id===s.id); if(c) s={...c,...s,lat:c.lat,lon:c.lon,kind:c.kind,place:c.place}; }
-  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,created_at,taken_at,condition").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).order("created_at",{ascending:false}).limit(1);
+  const {data:visits,error}=await sb.from("visits").select("id,photo_paths,created_at,taken_at,condition").eq("stop_id",s.id).order("taken_at",{ascending:false,nullsFirst:false}).order("created_at",{ascending:false}).limit(5);
   if(error) return oops("This stop didn't load. Check you have signal.",()=>go("stop",s,false));
   const v=visits[0];
+  // Every visit's photos are shown, newest first: a new photo adds to the stop, it never replaces the older ones.
+  let pn=0; const gallery=visits.map((x,k)=>`${(x.photo_paths||[]).map(p=>{ pn++; return `<div class="photo" role="button" tabindex="0" data-ph aria-label="Photo ${pn} of this stop. Tap to make it bigger"><img src="${photoUrl(p)}" alt="Photo ${pn} of this stop"${k?' loading="lazy"':""}></div>`; }).join("")}
+     <p class="caption">${(x.photo_paths||[]).length>1?"Photos":"Photo"} taken ${when(x.taken_at||x.created_at)}.${k?"":" Tap a photo to make it bigger."} <button class="linkish" data-rv="${x.id}">Report ${(x.photo_paths||[]).length>1?"these photos":"this photo"}</button></p>`).join("");
   const {data:finds}=await safe(sb.rpc("stop_finds",{p_stop:s.id}));
   const mine=myFinds().includes(s.id);
   const where=`${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}${s.metres!=null?" · "+dist(s.metres):""}`;
   view.innerHTML=`<h1>${esc(s.name)}</h1><p class="lede">${where}</p>
-   ${v?`${v.photo_paths.map((p,i)=>`<div class="photo" role="button" tabindex="0" data-ph aria-label="Photo ${i+1} of this stop. Tap to make it bigger"><img src="${photoUrl(p)}" alt="Photo ${i+1} of this stop"></div>`).join("")}
-     <p class="caption">Photo taken ${when(v.taken_at||v.created_at)}. Tap a photo to make it bigger.</p>
+   ${v?`${gallery}
+     
      ${v.condition?`<p class="condline">${CONDITION_LABEL[v.condition]} (${when(v.taken_at||v.created_at)})</p>`:""}`
    :`<div class="done"><h2>No photo yet</h2><p>Be the first to show people what this stop looks like.</p></div>`}
    <div class="found">
@@ -606,7 +651,7 @@ const SCREENS={
     ${s.lat!=null?`<a class="big plain" href="https://www.google.com/maps/dir/?api=1&destination=${+s.lat},${+s.lon}" target="_blank" rel="noopener">Get directions</a>`:""}
     <button class="big green" id="addhere">Add a new photo here</button>
     <button class="big plain" id="printsign">Print a sign for this stop</button>
-    ${v?'<button class="big plain" id="report">Report this photo</button><p id="reported" class="small" hidden>Thank you. If one more person reports it, it is hidden until it is checked.</p>':""}
+    
    </div>`;
   $("#printsign").onclick=()=>go("sign",s);
   const fb=$("#foundit"); if(fb&&!mine) fb.onclick=async()=>{ fb.disabled=true;
@@ -616,10 +661,10 @@ const SCREENS={
     $("#foundcount").textContent=`Well done! Found by ${data.count} ${data.count===1?"person":"people"}. You've found ${myFinds().length} book stop${myFinds().length>1?"s":""}.`; };
   view.querySelectorAll("[data-ph]").forEach(ph=>{const t=()=>ph.classList.toggle("zoomed"); ph.onclick=t; ph.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();t();}};});
   $("#addhere").onclick=()=>go("photo",s);
-  const r=$("#report"); if(r) r.onclick=async()=>{ r.disabled=true;
-    const {error}=await sb.rpc("report_visit",{p_visit:v.id,p_reason:"reported from stop page",p_device:DEVICE});
+  view.querySelectorAll("[data-rv]").forEach(r=>r.onclick=async()=>{ r.disabled=true;
+    const {error}=await sb.rpc("report_visit",{p_visit:r.dataset.rv,p_reason:"reported from stop page",p_device:DEVICE});
     if(error){ r.disabled=false; r.textContent="Report didn't send. Tap to try again"; return; }
-    r.hidden=true; $("#reported").hidden=false; };
+    r.outerHTML='<span>Thank you. If one more person reports it, it is hidden until it is checked.</span>'; });
  },
  sign(s){
   // A poster for the people who look after a stop to print and put up. The QR code opens this stop's page.
@@ -718,37 +763,97 @@ const SCREENS={
   wireCards(data); $("#new").onclick=()=>go("newstop");
  },
  newstop(opt){
-  const at=opt?.at||null, preset=opt?.preset||null;
-  view.innerHTML=`<h1>Add your stop</h1>
-   <p class="lede">${at?"We'll put it where your photo was taken.":"You need to be standing at it, so the map puts it in the right place."}</p>
-   <label class="field" for="sname">What is it called?
-    <input type="search" id="sname" placeholder="For example: Cubert bus shelter" maxlength="80" autocomplete="off"></label>
-   <p style="font-weight:700">What is it?</p>
-   <div class="actions" id="kinds">
-    <button class="big plain" data-k="phone_box">A phone box</button>
-    <button class="big plain" data-k="bus_shelter">A bus shelter</button>
-    <button class="big plain" data-k="other">Something else</button>
-   </div>
-   <p id="msg" class="small" role="status"></p>`;
-  view.querySelectorAll("#kinds button").forEach(b=>b.onclick=async()=>{
-   const name=$("#sname").value.trim(); if(name.length<2){ $("#msg").textContent="Please type a name for the stop first."; $("#sname").focus(); return; }
-   let pt=at;
-   if(!pt){
-    $("#msg").textContent="Checking where you are…";
-    try{ await locate(); }catch(e){ $("#msg").textContent=e.message; return; }
-    if(here.acc>60){ $("#msg").textContent=`Your phone only knows where you are to within ${Math.round(here.acc)} metres. Step outside or wait a moment, then tap again.`; return; }
-    pt=here;
-   }
-   const {data,error}=await sb.rpc("add_stop",{p_name:name,p_kind:b.dataset.k,p_place:null,p_lat:pt.lat,p_lon:pt.lon,p_device:DEVICE});
-   if(error){ $("#msg").textContent=/too many/.test(error.message)?"This phone has added a lot of stops today. Please try again tomorrow.":"The stop didn't save. Check you have signal and tap again."; return; }
-   if(!data.ok){ const s={id:data.existing_id,name:data.existing_name,kind:b.dataset.k};
-     view.innerHTML=`<div class="done"><h2>This stop is already on the map</h2><p>It's called "${esc(s.name)}". We'll add your photo to it, so all the photos stay together.</p></div>
-      <button class="big green" id="useit">Add my photo to ${esc(s.name)}</button>`;
-     $("#useit").onclick=()=>go("photo",{...s,preset}); return; }
-   const added={id:data.id,name,kind:b.dataset.k,place:null,lat:pt.lat,lon:pt.lon};
-   rememberStop(added); // a list fetched later comes from the database, which already has it
-   go("photo",{...added,preset});
-  });
+  // A stop that isn't on the map yet: one photo, one tap for what it is, done. Nothing to type.
+  // The phone works out where the stop is (watched in the background while the photo is taken) and what to call it.
+  let files=opt?.preset?[...opt.preset]:[];
+  let photoPt=opt?.at||null, live=null, atStop=!photoPt, watching=false, denied=false;
+  let kind=null, place=null, askedFor=null, custom="", near=null, sending=false;
+  const pos=()=>photoPt||(atStop?live:null);
+  const key=p=>`${p.lat.toFixed(4)},${p.lon.toFixed(4)}`;
+  const name=()=>custom.trim()||autoName(place,kind);
+  const refresh=()=>{
+   const p=pos();
+   const mb=$("#maybe"); if(mb){ mb.innerHTML=near&&files.length?`<div class="waiting"><b>Is it this one? ${esc(near.name)} is already on the map, about ${Math.max(10,Math.round(near.metres/10)*10)} metres from here.</b>
+      <button class="big plain" id="usenear">Yes, add my photo to it</button><span>If yours is a different stop, carry on below.</span></div>`:"";
+     const u=$("#usenear"); if(u) u.onclick=()=>go("photo",{...near,preset:files}); }
+   const nb=$("#namebox"); if(nb&&kind&&!nb.dataset.edit){
+     nb.innerHTML=`<p>${custom.trim()||place?`We'll call it <b>${esc(name())}</b>.`:"We'll name it after the place it's in."} <button class="linkish" id="rename">Change the name</button></p>`;
+     $("#rename").onclick=()=>{ nb.dataset.edit="1"; custom=custom.trim()||(place?name():"");
+       nb.innerHTML=`<label class="field" for="nname">Name of the stop<input type="search" id="nname" maxlength="80" autocomplete="off" placeholder="For example: Cubert bus shelter" value="${esc(custom)}"></label>`;
+       $("#nname").oninput=e=>{custom=e.target.value;}; $("#nname").focus(); }; }
+   const loc=$("#loc"); if(loc){
+     loc.innerHTML=p?"":denied?"Location is switched off for this page, so we can't tell where the stop is. Switch it on in your phone's settings and come back."
+       :!atStop?`This photo doesn't say where it was taken. <button class="linkish" id="imhere">I'm standing at the stop now</button>`:"Finding where you are…";
+     const ih=$("#imhere"); if(ih) ih.onclick=()=>{ atStop=true; watch(); located(); }; }
+  };
+  const located=()=>{ const p=pos(); refresh(); if(!p) return;
+   const k=key(p); if(askedFor===k) return; askedFor=k;
+   nearestFromCache(p,1).then(l=>{ if(askedFor!==k) return; near=l[0]&&l[0].metres<150?l[0]:null; refresh(); }).catch(()=>{});
+   if(navigator.onLine) placeFor(p).then(x=>{ if(askedFor!==k) return; place=x; refresh(); });
+  };
+  const watch=()=>{ if(watching||!navigator.geolocation) return; watching=true;
+   const id=navigator.geolocation.watchPosition(p=>{ const f={lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy};
+      denied=false; if(!live||f.acc<=live.acc){ live=f; here=f; located(); } },
+     e=>{ if(e.code===1){ denied=true; refresh(); } },
+     {enableHighAccuracy:true,maximumAge:0,timeout:30000});
+   leave=()=>navigator.geolocation.clearWatch(id); };
+  const picked=async(e,fromCamera)=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
+   $("#msg").textContent="Getting the photo ready…";
+   const meta=await readExif(f).catch(()=>({}));
+   try{ const blob=await shrink(f); files=[{blob,url:URL.createObjectURL(blob),taken:meta.taken||null}]; }
+   catch(err){ $("#msg").textContent="That photo couldn't be opened. Try choosing it again."; return; }
+   if(fromCamera){ photoPt=null; atStop=true; watch(); }
+   else if(meta.gps){ photoPt=meta.gps; }
+   else { photoPt=null; atStop=false; }
+   render(); located();
+  };
+  const add=async()=>{ if(sending) return; const p=pos(), m=t=>{ const el=$("#msg"); if(el) el.textContent=t; };
+   if(!p) return m(atStop?"Your phone is still finding where you are. Give it a moment, then tap again.":"We need to know where the stop is. Tap \"I'm standing at the stop now\" above, or use a different photo.");
+   if(!photoPt&&p.acc>150) return m(`Your phone only knows where you are to within ${Math.round(p.acc)} metres. Step into the open, wait a moment, then tap again.`);
+   sending=true; $("#addit").disabled=true;
+   const nm=custom.trim()||(place?autoName(place,kind):null);
+   const v={id:`${Date.now()}-${Math.random().toString(36).slice(2,8)}`, stop:{id:null,name:nm||autoName(null,kind),kind},
+     newStop:{name:nm,place,kind,lat:p.lat,lon:p.lon}, blobs:files.map(f=>f.blob),
+     takenAt:files.map(f=>f.taken).filter(Boolean).sort()[0]||new Date().toISOString(), condition:null};
+   const later=async()=>{ try{ await qPut(v); go("thanks",{name:"your new stop",queued:true}); }
+     catch(e){ sending=false; $("#addit").disabled=false; m("There's no signal and the photo couldn't be kept on this phone. Try again when you have signal."); } };
+   if(!navigator.onLine) return later();
+   try{ await sendVisit(v,m); go("thanks",{...v.stop,added:!v.existing,existing:v.existing}); }
+   catch(e){
+    if(e.message==="toomanystops"||e.message==="toomany"){ sending=false; $("#addit").disabled=false;
+      return m(e.message==="toomanystops"?"This phone has added a lot of stops today. Please try again tomorrow.":"This phone has sent a lot of photos in the last hour. Please try again later."); }
+    later(); // almost always the signal dropping: keep it on the phone and send later
+   } };
+  const render=()=>{
+   view.innerHTML=`<h1>Add a new book stop</h1>
+    ${files.length?"":`<p class="lede">Take a photo of it. Your phone works out where it is and what to call it, so there's nothing to type.</p>
+     <p>Stand back far enough to get the whole phone box or shelter in.</p>`}
+    <div id="pv" class="list">${files.map((f,i)=>`<div class="photo"><img src="${f.url}" alt="Your photo ${i+1}"></div>`).join("")}</div>
+    ${files.length?`<button class="big plain" id="again">Use a different photo</button>`
+     :`<label class="big red" for="ncam" style="cursor:pointer">Take a photo of the stop</label>
+       <label class="big plain" for="ngal" style="cursor:pointer">Use a photo already on my phone</label>`}
+    <input type="file" id="ncam" accept="image/*" capture="environment" hidden>
+    <input type="file" id="ngal" accept="image/*" hidden>
+    <div id="maybe"></div>
+    ${files.length?`<p style="font-weight:700;margin-bottom:8px">What is it? Tap one.</p>
+     <div class="cond" id="kinds" style="grid-template-columns:1fr">
+      <button data-k="phone_box" aria-pressed="${kind==="phone_box"}">A phone box</button>
+      <button data-k="bus_shelter" aria-pressed="${kind==="bus_shelter"}">A bus shelter</button>
+      <button data-k="other" aria-pressed="${kind==="other"}">Something else</button>
+     </div>
+     <div id="namebox"></div>
+     <p id="loc" class="small" role="status"></p>
+     <button class="big green" id="addit"${kind?"":" hidden"}>Add this stop to the map</button>
+     <p class="small">By adding it, you agree Swap Stop can show your photo to everyone who uses it. It's still yours. Please leave out people and car number plates.</p>`:""}
+    <p id="msg" class="small" role="status"></p>`;
+   $("#ncam").onchange=e=>picked(e,true); $("#ngal").onchange=e=>picked(e,false);
+   const ag=$("#again"); if(ag) ag.onclick=()=>{ files=[]; photoPt=null; atStop=true; near=null; askedFor=null; render(); watch(); located(); };
+   view.querySelectorAll("#kinds button").forEach(b=>b.onclick=()=>{ kind=b.dataset.k;
+     view.querySelectorAll("#kinds button").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); $("#addit").hidden=false; refresh(); });
+   const a=$("#addit"); if(a) a.onclick=add;
+   refresh();
+  };
+  render(); if(atStop) watch(); located();
  },
  photo(s){
   let files=s.preset?[...s.preset]:[];
@@ -812,11 +917,11 @@ const SCREENS={
    <p>There's no signal right now, so your photos of ${esc(s.name)} are kept safe on this phone.</p>
    <p>They'll send by themselves the next time Swap Stop is open and you have signal. You don't need to do anything else.</p></div>`
    :`<div class="done"><h1>Thank you</h1>
-   <p>Your photos of ${esc(s.name)} are saved. Anyone looking at this stop can see them now.</p>
+   <p>${s.added?`${esc(s.name)} is now on the map, with your photo.`:s.existing?`This stop was already on the map as ${esc(s.name)}, so your photo has been added to it.`:`Your photos of ${esc(s.name)} are saved. Anyone looking at this stop can see them now.`}</p>
    <p class="small">Now people heading here will know what to look for.</p></div>`)+`
-   <button class="big green" id="see">See ${esc(s.name)}</button>
+   ${s.id?`<button class="big green" id="see">See ${esc(s.name)}</button>`:""}
    <button class="big plain" id="h">Back to the start</button>`;
-  $("#see").onclick=()=>{history_=[["home"]]; go("stop",s);};
+  const see=$("#see"); if(see) see.onclick=()=>{history_=[["home"]]; go("stop",s);};
   $("#h").onclick=()=>{history_=[]; go("home");};
  },
  about(){
@@ -826,7 +931,7 @@ const SCREENS={
    <h2>Your photos</h2>
    <p>When you add a photo, you agree Swap Stop can show it to everyone who uses it. The photo is still yours. Please only add photos you took yourself, and leave out people and car number plates. Anyone can report a photo, and reported photos are checked.</p>
    <h2>Your privacy</h2>
-   <p>There are no accounts. Your phone keeps a random code so we can stop one phone sending too much at once, and it remembers which stops you've found. Before a photo is sent, the hidden location and camera details inside it are removed. Your location is only used to look up the stops near you, and Swap Stop doesn't save it.</p>
+   <p>There are no accounts. Your phone keeps a random code so we can stop one phone sending too much at once, and it remembers which stops you've found. Before a photo is sent, the hidden location and camera details inside it are removed. Your location is only used to look up the stops near you, and Swap Stop doesn't save it. When you add a new stop, the stop's position is saved (that's how it gets on the map) and is sent to postcodes.io, a free UK service, to find the name of the place it's in. The towns, villages and postcodes you type into the search box are looked up there too.</p>
    <h2>Map data</h2>
    <p>The map is drawn by <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>. The map and most stop locations come from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>, © OpenStreetMap contributors, available under the <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">Open Database License</a>. Our list of stops, including ones added by Swap Stop users, is shared under the same licence.</p>
    <button class="big plain" id="dlstops">Download the list of stops</button>
@@ -865,6 +970,14 @@ const SCREENS={
    $("#osignout").onclick=async()=>{ await os.auth.signOut(); go("owner",null,false); }; return;
   }
   const st=o.stats;
+  const {data:ostops}=await safe(os.rpc("owner_stops"));
+  const scard=x=>`<li class="oc${x.hidden?" ohid":""}">
+    <div class="name">${esc(x.name)}${x.hidden?' <span class="otag">Hidden</span>':""}</div>
+    <div class="meta">${esc(KIND_LABEL[x.kind]||"")}${x.place?", "+esc(x.place):""} · added ${when(x.created_at)}${x.source==="osm"?" · from the original map data":""} · ${x.visits} photo visit${x.visits===1?"":"s"}, ${x.finds} find${x.finds===1?"":"s"}</div>
+    <div class="row">
+     ${x.hidden?`<button class="big green" data-a="stopshow" data-s="${esc(x.id)}">Put back on the map</button>`
+       :`<button class="big red" data-a="stophide" data-s="${esc(x.id)}">Hide this stop</button><button class="big plain" data-a="open" data-s="${esc(x.id)}">Open stop</button>`}
+    </div></li>`;
   const card=(v,kind)=>`<li class="oc${v.hidden?" ohid":""}">
     <div class="ophotos">${v.photo_paths.map(p=>`<a href="${photoUrl(p)}" target="_blank" rel="noopener"><img src="${photoUrl(p)}" alt="" loading="lazy"></a>`).join("")}</div>
     <div class="name">${esc(v.stop_name)}${v.hidden?' <span class="otag">Hidden</span>':""}</div>
@@ -880,6 +993,9 @@ const SCREENS={
    <div class="actions"><button class="big plain" id="orefresh">Refresh</button></div>
    ${o.top_finds.length?`<h2>Most found stops</h2><ol class="topfinds">${o.top_finds.map(t=>`<li>${esc(t.stop_name)}: ${t.finds}</li>`).join("")}</ol>`:""}
    <p id="omsg" class="small" role="status"></p>
+   ${ostops?`<h2>Stops added by people (${ostops.length})</h2>
+    <p class="small">Hiding takes a stop off the map and lists for everyone. Nothing is deleted, and you can put it back. Other phones may keep showing it for up to 6 hours.</p>
+    ${ostops.length?`<ul class="list olist">${ostops.map(scard).join("")}</ul>`:'<p class="small">None yet.</p>'}`:""}
    <h2>Reported (${o.reported.length})</h2>
    ${o.reported.length?`<ul class="list olist">${o.reported.map(v=>card(v,"reported")).join("")}</ul>`:'<p class="small">Nothing reported.</p>'}
    <h2>Hidden (${o.hidden.length})</h2>
@@ -895,28 +1011,44 @@ const SCREENS={
    const a=b.dataset.a, id=b.dataset.v;
    if(a==="open"){ const {data:s}=await sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",b.dataset.s).maybeSingle(); if(s) go("stop",s); return; }
    b.disabled=true;
-   const r=a==="hide"?await os.rpc("owner_set_hidden",{p_visit:id,p_hidden:true})
+   const r=a.startsWith("stop")?await os.rpc("owner_set_stop_hidden",{p_stop:b.dataset.s,p_hidden:a==="stophide"})
+     :a==="hide"?await os.rpc("owner_set_hidden",{p_visit:id,p_hidden:true})
      :a==="show"?await os.rpc("owner_set_hidden",{p_visit:id,p_hidden:false})
      :await os.rpc("owner_dismiss_reports",{p_visit:id});
    if(r.error){ b.disabled=false; msg("That didn't work: "+r.error.message); return; }
+   if(a.startsWith("stop")){ window.__allStops=null; try{localStorage.removeItem("swapstop-stops");}catch(e){} } // this phone's saved stop list is now out of date
    reload(); });
  },
- async search(q){
+ // Search understands two things: the name of a stop, and any UK town, village or postcode, for which it lists
+ // the nearest stops. arg is the typed text, or {q, at} when one of several same-named places has been picked.
+ async search(arg){
+  const q=typeof arg==="string"?arg:arg.q; let at=typeof arg==="string"?null:arg.at;
   busy("Searching…");
-  const {data:raw,error}=await sb.rpc("search_all",{p_q:q,p_lat:here?.lat??null,p_lon:here?.lon??null});
-  if(error) return oops("The search didn't work. Check you have signal.",()=>go("search",q,false));
-  const data=raw.filter(h=>h.hit==="place"); // places only: book lists are deliberately not part of Swap Stop
+  const [named,found]=await Promise.all([safe(sb.rpc("search_all",{p_q:q,p_lat:here?.lat??null,p_lon:here?.lon??null})), at?[]:findPlaces(q)]);
+  const others=at?[]:found.slice(1); at=at||found[0]||null;
+  let near=[]; if(at){ const r=await safe(sb.rpc("stops_near",{p_lat:at.lat,p_lon:at.lon,p_limit:10})); near=r.data||[]; }
+  if(named.error&&!near.length) return oops("The search didn't work. Check you have signal.",()=>go("search",arg,false));
+  const byName=(named.data||[]).filter(h=>h.hit==="place"&&!near.some(s=>s.id===h.stop_id)); // places only: book lists are deliberately not part of Swap Stop
   const n=q.toLowerCase(); const hl=x=>esc(x).replace(new RegExp(n.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"ig"),m=>`<mark>${m}</mark>`);
+  const far=m=>{ const mi=m/1609.344; return mi<0.5?"Less than half a mile":`${mi<20?mi.toFixed(1):Math.round(mi)} miles`; };
   view.innerHTML=`<h1>Results for “${esc(q)}”</h1>
-   ${data.length?`<ul class="list">${data.map((h,i)=>`<li><button class="stop" data-i="${i}">
+   ${at?(near.length?`<h2>Book stops nearest ${esc(at.label)}</h2>
+     <ul class="list">${near.map((s,i)=>`<li><button class="stop" data-n="${i}"><div class="thumb">${thumb(s.latest_photo)}</div>
+      <div><div class="name">${esc(s.name)}</div><div class="meta"><span class="dist">${far(s.metres)} from ${esc(at.name)}</span></div>
+      <div class="meta">${esc(KIND_LABEL[s.kind]||"")}${s.place?", "+esc(s.place):""}</div></div></button></li>`).join("")}</ul>`
+    :`<div class="done"><h2>No book stops near ${esc(at.label)} yet</h2><p>Know of one there? You can add it to the map when you're standing at it.</p></div>`):""}
+   ${byName.length?`<h2>${at?"Stops with that in their name":"Stops with that name"}</h2><ul class="list">${byName.map((h,i)=>`<li><button class="stop" data-i="${i}">
      <div class="thumb"><div class="shelf" style="background:var(--tint)"></div></div>
      <div><div class="name">${hl(h.stop_name)}</div>${h.place?`<div class="meta">${hl(h.place)}</div>`:""}
-     ${h.metres!=null?`<div class="meta"><span class="dist">${dist(h.metres)}</span></div>`:""}</div></button></li>`).join("")}</ul>`
-   :`<div class="done"><h2>No stops found</h2><p>No stop or place matches that. Try a shorter word, like just the village or town name.</p></div>`}
+     ${h.metres!=null?`<div class="meta"><span class="dist">${dist(h.metres)}</span></div>`:""}</div></button></li>`).join("")}</ul>`:""}
+   ${!at&&!byName.length?`<div class="done"><h2>Nothing found</h2><p>We couldn't find a place or a stop called that. Check the spelling, or try the nearest town or a postcode.</p></div>`:""}
+   ${others.length?`<p style="font-weight:700">Did you mean a different ${esc(at.name)}?</p><div class="actions">${others.map((o,i)=>`<button class="big plain" data-o="${i}">${esc(o.label)}</button>`).join("")}</div>`:""}
    <button class="big plain" id="again">Search again</button>`;
-  view.querySelectorAll(".stop").forEach(b=>b.onclick=async()=>{ const h=data[+b.dataset.i];
+  view.querySelectorAll("[data-n]").forEach(b=>b.onclick=()=>{ const s=near[+b.dataset.n]; go("stop",{...s,metres:here?distance(here,s):null}); });
+  view.querySelectorAll("[data-i]").forEach(b=>b.onclick=async()=>{ const h=byName[+b.dataset.i];
    const {data:s}=await sb.from("stops").select("id,name,kind,place,lat,lon").eq("id",h.stop_id).maybeSingle();
    if(s) go("stop",{...s,metres:h.metres}); });
+  view.querySelectorAll("[data-o]").forEach(b=>b.onclick=()=>go("search",{q,at:others[+b.dataset.o]}));
   $("#again").onclick=()=>{history_=[]; go("home"); $("#q").focus();};
  }
 };
